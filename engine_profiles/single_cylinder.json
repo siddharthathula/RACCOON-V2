@@ -1,0 +1,229 @@
+{
+  "injection_strategy": "semi-sequential",
+  "ignition_strategy": "static_table",
+  "idle_strategy": "pwm_iac",
+  "lambda_strategy": "off",
+  "name": "single_cylinder",
+  "description": "Generic 500 cc single. A sensible starting point for an air-cooled road single, NOT a description of any particular engine. Copy it, fill in your own measurements, and the unverified list will tell you what is still missing.",
+  "use": "road",
+  "geometry": {
+    "cylinders": {
+      "value": 1,
+      "provenance": "assumed"
+    },
+    "bore_mm": {
+      "value": 82.0,
+      "provenance": "assumed",
+      "note": "replace with your engine's"
+    },
+    "stroke_mm": {
+      "value": 94.0,
+      "provenance": "assumed",
+      "note": "replace with your engine's"
+    },
+    "compression_ratio": {
+      "value": 9.5,
+      "provenance": "assumed"
+    },
+    "rod_ratio": {
+      "value": 1.45,
+      "provenance": "assumed"
+    },
+    "crank_layout": {
+      "value": 0,
+      "provenance": "assumed",
+      "note": "single"
+    },
+    "firing_order": [
+      0
+    ]
+  },
+  "trigger": {
+    "crank_teeth": {
+      "value": 24,
+      "provenance": "datasheet",
+      "source": "counted on the fitted wheel"
+    },
+    "missing_teeth": {
+      "value": 1,
+      "provenance": "datasheet",
+      "source": "same"
+    },
+    "missing_tooth_index": {
+      "value": 0,
+      "provenance": "datasheet"
+    },
+    "tooth_1_angle_atdc": {
+      "value": 0.0,
+      "provenance": "measured",
+      "source": "timing light against cylinder 1 TDC"
+    },
+    "teeth_per_rev": {
+      "value": 1,
+      "provenance": "datasheet"
+    },
+    "cam_teeth": {
+      "value": 0,
+      "provenance": "datasheet",
+      "note": "no cam sensor"
+    },
+    "tooth_1_polarity": {
+      "value": 3,
+      "provenance": "measured",
+      "source": "scope at the ECU pin"
+    },
+    "input_filter_level": {
+      "value": 1,
+      "provenance": "assumed",
+      "note": "start conservative, tighten once the noise floor is measured"
+    },
+    "sync_skip_revolutions": {
+      "value": 0,
+      "provenance": "datasheet"
+    }
+  },
+  "hardware": {
+    "injector_peak_a": {
+      "value": 4.0,
+      "provenance": "datasheet",
+      "source": "DUTY-cycle injector, measured on a flow bench"
+    },
+    "injector_hold_a": {
+      "value": 1.2,
+      "provenance": "datasheet",
+      "source": "same"
+    },
+    "injector_max_duty_pct": {
+      "value": 80.0,
+      "provenance": "assumed",
+      "note": "80 percent, leaving headroom; a duty that pins the injector open at part throttle cooks it"
+    },
+    "injector_count": {
+      "value": 1,
+      "provenance": "datasheet"
+    },
+    "ignition_peak_a": {
+      "value": 7.5,
+      "provenance": "datasheet",
+      "source": "coil datasheet"
+    },
+    "ignition_hold_a": {
+      "value": 3.5,
+      "provenance": "datasheet",
+      "source": "same"
+    },
+    "ignition_max_dwell_ms": {
+      "value": 8.0,
+      "provenance": "datasheet",
+      "source": "coil datasheet, plus a thermal margin"
+    },
+    "ignition_count": {
+      "value": 1,
+      "provenance": "datasheet"
+    },
+    "spark_divider_ratio": {
+      "value": 9.0,
+      "provenance": "datasheet",
+      "source": "coil datasheet"
+    },
+    "injector_driver_type": {
+      "value": "high_z_saturated",
+      "provenance": "datasheet",
+      "source": "injector datasheet: high impedance saturates, low impedance needs peak and hold"
+    },
+    "ignition_driver_topology": {
+      "value": "smart_coil",
+      "provenance": "datasheet",
+      "source": "coil datasheet"
+    },
+    "knock_sensor_count": {
+      "value": 0,
+      "provenance": "assumed",
+      "note": "none fitted; knock control cannot arm with a zero count"
+    },
+    "wheel_speed_channels": {
+      "value": 0,
+      "provenance": "assumed"
+    },
+    "pedal_channels": {
+      "value": 1,
+      "provenance": "assumed"
+    },
+    "throttle_channels": {
+      "value": 1,
+      "provenance": "assumed",
+      "note": "cable throttle, one sensor"
+    },
+    "lambda_channels": {
+      "value": 0,
+      "provenance": "assumed",
+      "note": "no wideband fitted; closed loop stays off until one is"
+    },
+    "has_kill_switch": {
+      "value": true,
+      "provenance": "assumed",
+      "note": "assumed present on a road bike. CONFIRM THE WIRING: the profile assumes it fails safe."
+    },
+    "has_boost": {
+      "value": false,
+      "provenance": "datasheet"
+    },
+    "has_vvt": {
+      "value": false,
+      "provenance": "datasheet"
+    },
+    "has_traction": {
+      "value": false,
+      "provenance": "datasheet"
+    },
+    "has_dbw": {
+      "value": false,
+      "provenance": "datasheet"
+    }
+  },
+  "limits": {
+    "max_rpm": {
+      "value": 11000,
+      "provenance": "datasheet",
+      "source": "manufacturer rev limit"
+    },
+    "safety_rpm_limit": {
+      "value": 10500,
+      "provenance": "datasheet",
+      "source": "the soft cut, set below the limiter"
+    },
+    "overspeed_rpm": {
+      "value": 12000,
+      "provenance": "assumed",
+      "note": "the hard fault, above the soft cut"
+    },
+    "idle_rpm": {
+      "value": 1300,
+      "provenance": "assumed",
+      "note": "set by the idle controller at commissioning"
+    },
+    "ignition_min_deg": {
+      "value": -10.0,
+      "provenance": "datasheet",
+      "source": "coil and plug limits"
+    },
+    "ignition_max_deg": {
+      "value": 35.0,
+      "provenance": "datasheet",
+      "source": "detonation limit, conservative"
+    },
+    "lean_lambda_limit": {
+      "value": 1.25,
+      "provenance": "assumed"
+    },
+    "rich_lambda_limit": {
+      "value": 0.75,
+      "provenance": "assumed"
+    },
+    "boost_max_kpa": {
+      "value": 101.3,
+      "provenance": "datasheet",
+      "note": "naturally aspirated: atmospheric"
+    }
+  }
+}

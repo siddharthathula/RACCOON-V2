@@ -1,0 +1,585 @@
+# RACCOON V2 - engine geometry, cycle and crank/cam position sensing.
+# Single source of truth for the firmware image and the tuner. See docs/CALIBRATION_SPEC.md.
+schema_version: 1
+
+groups:
+  - name: engine
+    base_id: 0x0100
+    items:
+      - name: cylinder_count
+        id: 0x0100
+        type: u8
+        unit: ""
+        default: 2
+        min: 1
+        max: 4
+        owner: ENGINEER
+        safety_class: CRITICAL
+        default_source: UNVERIFIED
+        description: >-
+          Number of cylinders. 1..4 is the supported product range; the engine core
+          contains no per-engine code, only this number and the geometry below.
+        live_edit: false
+
+      - name: bore_mm
+        id: 0x0101
+        type: f32
+        unit: mm
+        scale: 0.001
+        default: 78.0
+        min: 20.0
+        max: 150.0
+        owner: ENGINEER
+        safety_class: HIGH
+        default_source: SOURCE-DERIVED
+        source_ref: "GT650-001 sec.1 (RE technical specification)"
+
+      - name: stroke_mm
+        id: 0x0102
+        type: f32
+        unit: mm
+        scale: 0.001
+        default: 67.8
+        min: 10.0
+        max: 200.0
+        owner: ENGINEER
+        safety_class: HIGH
+        default_source: SOURCE-DERIVED
+        source_ref: "GT650-001 sec.1"
+
+      - name: compression_ratio
+        id: 0x0103
+        type: f32
+        unit: ":1"
+        scale: 0.01
+        default: 9.5
+        min: 4.0
+        max: 20.0
+        owner: ENGINEER
+        safety_class: HIGH
+        default_source: SOURCE-DERIVED
+        source_ref: "GT650-001 sec.1"
+
+      - name: displacement_cc
+        id: 0x011A
+        type: f32
+        unit: cc
+        scale: 1.0
+        default: 0.0
+        min: 0.0
+        max: 20000.0
+        owner: ENGINEER
+        safety_class: MEDIUM
+        live_edit: false
+        default_source: UNVERIFIED
+        description: >-
+          Optional: a stated total displacement, cross-checked against bore x stroke at
+          configuration load. A disagreement beyond 2 percent refuses the configuration
+          rather than being quietly preferred. Leave at 0 to derive it purely.
+
+      - name: rod_ratio
+        id: 0x0104
+        type: f32
+        unit: ":1"
+        scale: 0.001
+        default: 1.45
+        min: 0.8
+        max: 2.5
+        owner: ENGINEER
+        safety_class: MEDIUM
+        default_source: UNVERIFIED
+        description: >-
+          Connecting rod length / crank radius. Not published for the GT650; it only
+          affects the pumping-loss and volumetric-efficiency model, so a conservative
+          value is safe. Register UNK-GT-019.
+
+      - name: cycle_teeth
+        id: 0x0105
+        type: enum
+        default: 1
+        owner: ENGINEER
+        safety_class: CRITICAL
+        default_source: SOURCE-DERIVED
+        description: Engine cycle. 720 degrees is the only four-stroke timing model implemented.
+        values:
+          - {name: two_stroke_360, value: 0, description: Not supported for sequential injection}
+          - {name: four_stroke_720, value: 1, description: Four stroke, 2 crank revolutions}
+
+      - name: crank_layout
+        id: 0x0106
+        type: enum
+        default: 1
+        owner: ENGINEER
+        safety_class: CRITICAL
+        default_source: SOURCE-DERIVED
+        source_ref: "GT650-001 sec.1 (parallel twin)"
+        description: Crank arrangement. Determines the firing angles used by the scheduler.
+        values:
+          - {name: single, value: 0, description: Single cylinder}
+          - {name: parallel_180, value: 1, description: Parallel twin, 180 degree crank}
+          - {name: parallel_270, value: 2, description: V-twin, 270 degree crank}
+          - {name: inline_four, value: 3, description: Inline four}
+          - {name: boxer_180, value: 4, description: Boxer, 180 degree crank}
+          - {name: custom, value: 5, description: Uses the explicit firing angle table below}
+
+      - name: firing_order_cyl0
+        id: 0x0107
+        type: u8
+        default: 0
+        min: 0
+        max: 3
+        owner: ENGINEER
+        safety_class: CRITICAL
+        default_source: UNVERIFIED
+        description: >-
+          Which physical cylinder fires first. Wrong values inject into an exhaust
+          stroke, so this is gated by the arming check and verified on the bench.
+          Register UNK-GT-003.
+
+      - name: firing_order_cyl1
+        id: 0x0108
+        type: u8
+        default: 1
+        min: 0
+        max: 3
+        owner: ENGINEER
+        safety_class: CRITICAL
+        default_source: UNVERIFIED
+
+      - name: firing_order_cyl2
+        id: 0x0109
+        type: u8
+        default: 2
+        min: 0
+        max: 3
+        owner: ENGINEER
+        safety_class: CRITICAL
+        default_source: UNVERIFIED
+
+      - name: firing_order_cyl3
+        id: 0x010A
+        type: u8
+        default: 3
+        min: 0
+        max: 3
+        owner: ENGINEER
+        safety_class: CRITICAL
+        default_source: UNVERIFIED
+
+      - name: custom_firing_angle_0
+        id: 0x010B
+        type: f32
+        unit: deg
+        scale: 0.01
+        default: 0.0
+        min: 0.0
+        max: 720.0
+        owner: ENGINEER
+        safety_class: HIGH
+        default_source: UNVERIFIED
+        description: Firing angle of cylinder 0 after its TDC, for crank_layout = custom.
+
+      - name: custom_firing_angle_1
+        id: 0x010C
+        type: f32
+        unit: deg
+        scale: 0.01
+        default: 180.0
+        min: 0.0
+        max: 720.0
+        owner: ENGINEER
+        safety_class: HIGH
+        default_source: UNVERIFIED
+
+      - name: custom_firing_angle_2
+        id: 0x010D
+        type: f32
+        unit: deg
+        scale: 0.01
+        default: 360.0
+        min: 0.0
+        max: 720.0
+        owner: ENGINEER
+        safety_class: HIGH
+        default_source: UNVERIFIED
+
+      - name: custom_firing_angle_3
+        id: 0x010E
+        type: f32
+        unit: deg
+        scale: 0.01
+        default: 540.0
+        min: 0.0
+        max: 720.0
+        owner: ENGINEER
+        safety_class: HIGH
+        default_source: UNVERIFIED
+
+      - name: cam_phase_offset_deg
+        id: 0x010F
+        type: f32
+        unit: deg
+        scale: 0.01
+        default: 0.0
+        min: -180.0
+        max: 180.0
+        owner: ENGINEER
+        safety_class: CRITICAL
+        default_source: UNVERIFIED
+        description: >-
+          Crank angle of the cam reference edge relative to cylinder 1 TDC. Without a
+          measured value the configuration must not allow sequential operation.
+          Register UNK-GT-002.
+
+      - name: max_rpm
+        id: 0x0110
+        type: u16
+        unit: rpm
+        default: 9000
+        min: 1000
+        max: 20000
+        owner: ENGINEER
+        safety_class: CRITICAL
+        default_source: UNVERIFIED
+        description: >-
+          Design maximum. The hard limiter uses the safety copy, not this value; this
+          is used for table axis scaling and for plausibility rejection.
+
+      - name: idle_rpm_target
+        id: 0x0111
+        type: u16
+        unit: rpm
+        default: 1200
+        min: 400
+        max: 4000
+        owner: TUNER
+        safety_class: MEDIUM
+        default_source: SOURCE-DERIVED
+        source_ref: "GT650-001 sec.1 (idle 1200 +/- 100 rpm)"
+
+      - name: fuel_type
+        id: 0x0112
+        type: enum
+        default: 0
+        owner: TUNER
+        safety_class: MEDIUM
+        default_source: SOURCE-DERIVED
+        source_ref: "GT650-001 sec.1 (unleaded / E10 or less)"
+        values:
+          - {name: gasoline, value: 0}
+          - {name: e10, value: 1}
+          - {name: e85, value: 2}
+          - {name: race, value: 3}
+
+      - name: fuel_ethanol_fraction
+        id: 0x0113
+        type: f32
+        unit: frac
+        scale: 0.001
+        default: 0.0
+        min: 0.0
+        max: 1.0
+        owner: TUNER
+        safety_class: MEDIUM
+        default_source: SOURCE-DERIVED
+        description: >-
+          Ethanol fraction of the current fuel, from a flex-fuel sensor or set by hand.
+          Drives stoich AFR, density, cold start, ignition blend and lambda target.
+
+      - name: fuel_stoich_afr_gasoline
+        id: 0x0114
+        type: f32
+        unit: AFR
+        scale: 0.01
+        default: 14.7
+        min: 10.0
+        max: 20.0
+        owner: TUNER
+        safety_class: HIGH
+        default_source: SOURCE-DERIVED
+        description: Stoich air/fuel ratio for pump gasoline (14.7:1).
+
+      - name: fuel_stoich_afr_ethanol
+        id: 0x0115
+        type: f32
+        unit: AFR
+        scale: 0.01
+        default: 9.0
+        min: 6.0
+        max: 15.0
+        owner: TUNER
+        safety_class: HIGH
+        default_source: SOURCE-DERIVED
+        description: Stoich AFR for pure ethanol (about 9.0:1).
+
+      - name: fuel_density_gasoline
+        id: 0x0116
+        type: f32
+        unit: g/L
+        scale: 1.0
+        default: 745.0
+        min: 600.0
+        max: 900.0
+        owner: TUNER
+        safety_class: MEDIUM
+        default_source: SOURCE-DERIVED
+
+      - name: fuel_density_ethanol
+        id: 0x0117
+        type: f32
+        unit: g/L
+        scale: 1.0
+        default: 789.0
+        min: 600.0
+        max: 900.0
+        owner: TUNER
+        safety_class: MEDIUM
+        default_source: SOURCE-DERIVED
+
+      - name: air_density_sea_level
+        id: 0x0118
+        type: f32
+        unit: g/L
+        scale: 0.001
+        default: 1.225
+        min: 0.3
+        max: 2.0
+        owner: READ_ONLY
+        safety_class: MEDIUM
+        default_source: SOURCE-DERIVED
+        derived: true
+        description: Dry air density at 15 C, 101.325 kPa. Reference for the barometric correction.
+
+  - name: trigger
+    base_id: 0x0200
+    items:
+      - name: profile_crank
+        id: 0x0200
+        type: enum
+        default: 0
+        owner: ENGINEER
+        safety_class: CRITICAL
+        default_source: UNVERIFIED
+        description: >-
+          Crank trigger wheel profile. The generic profiles cover the common aftermarket
+          wheels; anything else is defined by the explicit profile items below.
+          Register UNK-GT-001.
+        values:
+          - {name: custom, value: 0, description: Use teeth/missing items below}
+          - {name: mt_60_2, value: 1, description: 60 teeth, 2 missing}
+          - {name: mt_60_3, value: 2, description: 60 teeth, 3 missing}
+          - {name: mt_36_1, value: 3, description: 36 teeth, 1 missing}
+          - {name: mt_36_2, value: 4, description: 36 teeth, 2 missing}
+          - {name: mt_36_3, value: 5, description: 36 teeth, 3 missing}
+          - {name: mt_24_1, value: 6, description: 24 teeth, 1 missing}
+          - {name: mt_24_2, value: 7, description: 24 teeth, 2 missing}
+          - {name: mt_16_1, value: 8, description: 16 teeth, 1 missing}
+          - {name: even_24, value: 9, description: 24 even teeth, no gap - no phase reference}
+          - {name: even_36, value: 10, description: 36 even teeth, no gap - no phase reference}
+          - {name: even_60, value: 11, description: 60 even teeth, no gap - no phase reference}
+          - {name: dual_wheel, value: 12, description: Crank plus cam wheel, phase locked}
+          - {name: quadrature, value: 13, description: Two channels, direction detection}
+
+      - name: profile_cam
+        id: 0x0201
+        type: enum
+        default: 0
+        owner: ENGINEER
+        safety_class: CRITICAL
+        default_source: UNVERIFIED
+        values:
+          - {name: none, value: 0, description: No cam sensor - sequential operation is refused}
+          - {name: mt_3_1, value: 1, description: 3 tooth half-speed wheel, 1 missing}
+          - {name: mt_4_1, value: 2, description: 4 tooth half-speed wheel, 1 missing}
+          - {name: single_edge, value: 3, description: One edge per cam revolution}
+          - {name: custom, value: 4, description: Use teeth/missing items below}
+
+      - name: teeth
+        id: 0x0202
+        type: u8
+        default: 36
+        min: 2
+        max: 120
+        owner: ENGINEER
+        safety_class: CRITICAL
+        default_source: UNVERIFIED
+        description: Teeth per revolution on this wheel (counted as if none were missing).
+
+      - name: missing_teeth
+        id: 0x0203
+        type: u8
+        default: 1
+        min: 0
+        max: 12
+        owner: ENGINEER
+        safety_class: CRITICAL
+        default_source: UNVERIFIED
+        description: Size of the contiguous missing-tooth gap, in teeth.
+
+      - name: teeth_per_rev
+        id: 0x0204
+        type: u8
+        default: 1
+        min: 1
+        max: 2
+        owner: ENGINEER
+        safety_class: CRITICAL
+        default_source: UNVERIFIED
+        description: 1 for a crank wheel, 2 for a half-speed cam wheel.
+
+      - name: tooth1_angle_atdc
+        id: 0x0205
+        type: f32
+        unit: deg
+        scale: 0.01
+        default: 0.0
+        min: 0.0
+        max: 360.0
+        owner: ENGINEER
+        safety_class: CRITICAL
+        default_source: UNVERIFIED
+        description: >-
+          Crank angle after TDC at which tooth 1 passes the sensor. This is the single
+          most consequential number in the product; it must be established with a
+          timing light, not guessed.
+
+      - name: trigger_edge_polarity
+        id: 0x0206
+        type: bits
+        default: 1
+        owner: ENGINEER
+        safety_class: HIGH
+        default_source: UNVERIFIED
+        bits: [crank_active_high, cam_active_high]
+
+      - name: input_filter_level
+        id: 0x0207
+        type: u8
+        default: 1
+        min: 0
+        max: 3
+        owner: TUNER
+        safety_class: HIGH
+        default_source: UNVERIFIED
+        description: >-
+          Software input filter, 0 off .. 3 aggressive. Default is deliberately mild: a
+          rejected real tooth desynchronises phase, which is worse than accepting one
+          noise edge. Rejection count is a logged channel.
+
+      - name: sync_skip_revolutions
+        id: 0x0208
+        type: u8
+        default: 0
+        min: 0
+        max: 3
+        owner: TUNER
+        safety_class: MEDIUM
+        default_source: UNVERIFIED
+        description: Revolutions of confirmation required before sync is declared.
+
+      - name: min_period_us
+        id: 0x0209
+        type: u32
+        unit: us
+        default: 40
+        min: 20
+        max: 100000
+        owner: ENGINEER
+        safety_class: CRITICAL
+        default_source: UNVERIFIED
+        description: >-
+          Shortest plausible tooth period. Edges faster than this are rejected, which is
+          what makes an impossible period and overspeed detectable.
+          Register UNK-FW-001.
+
+      - name: max_period_us
+        id: 0x020A
+        type: u32
+        unit: us
+        default: 2000000
+        min: 10000
+        max: 10000000
+        owner: ENGINEER
+        safety_class: CRITICAL
+        default_source: UNVERIFIED
+        description: Longest plausible period before a tooth timeout and SYNC_LOST.
+
+      - name: overspeed_period_us
+        id: 0x020B
+        type: u32
+        unit: us
+        default: 80
+        min: 20
+        max: 5000
+        owner: ENGINEER
+        safety_class: CRITICAL
+        default_source: UNVERIFIED
+        description: Below this period the decoder declares a hard fault and inhibits output.
+
+      - name: stall_timeout_ms
+        id: 0x020C
+        type: u16
+        unit: ms
+        default: 500
+        min: 50
+        max: 5000
+        owner: TUNER
+        safety_class: HIGH
+        default_source: UNVERIFIED
+
+      - name: prediction_enabled
+        id: 0x020D
+        type: bool
+        default: 1
+        owner: ENGINEER
+        safety_class: MEDIUM
+        default_source: UNVERIFIED
+        description: >-
+          Predict the rate at the target angle from the measured acceleration, bounded.
+          Disabling it makes timing exact only at constant speed and is for bench work.
+
+      - name: max_accel_rpm_per_s
+        id: 0x020E
+        type: u16
+        unit: rpm/s
+        default: 20000
+        min: 100
+        max: 60000
+        owner: ENGINEER
+        safety_class: HIGH
+        default_source: UNVERIFIED
+        description: >-
+          Acceleration bound for the predictor. Beyond it, prediction is disabled for the
+          window and a diagnostic is counted. No unbounded extrapolation is permitted.
+
+      - name: cam_teeth
+        id: 0x020F
+        type: u8
+        default: 0
+        min: 0
+        max: 8
+        owner: ENGINEER
+        safety_class: CRITICAL
+        default_source: UNVERIFIED
+        unit: teeth
+        description: >-
+          Cam wheel tooth count, used when profile_cam is 'custom'. The named profiles carry
+          their own count and ignore this item, because a 4-tooth half-speed wheel decoded as
+          3 teeth produces a cam phase that is wrong by a quarter of a cam revolution - and
+          a wrong cam phase under sequential injection is a cylinder fired at the wrong
+          time, which is not a starting problem, it is a broken-engine problem.
+
+      - name: cam_missing_teeth
+        id: 0x0210
+        type: u8
+        default: 0
+        min: 0
+        max: 2
+        owner: ENGINEER
+        safety_class: CRITICAL
+        default_source: UNVERIFIED
+        unit: teeth
+        description: >-
+          Gap teeth on a custom cam wheel, counted from tooth 1. A cam wheel with no gap has
+          no phase reference, so the decoder cannot tell one cam revolution from the next and
+          sequential injection is refused rather than guessed.

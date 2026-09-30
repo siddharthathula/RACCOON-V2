@@ -1,0 +1,234 @@
+{
+  "name": "gt650",
+  "description": "Kawasaki GT650, 648 cc air-cooled SOHC parallel twin. The first application profile. Every value carries its provenance, and most of what a track tune needs is NOT yet known - see docs/UNKNOWN_REGISTER.md (UNK-GT-001..019). This profile will idle and cruise. It is not a track tune until the fuel and ignition tables are measured.",
+  "use": "road",
+  "geometry": {
+    "cylinders": {
+      "value": 2,
+      "provenance": "datasheet",
+      "source": "RE Technical Specifications",
+      "note": "parallel twin, 180 degree crank"
+    },
+    "bore_mm": {
+      "value": 78.0,
+      "provenance": "datasheet",
+      "source": "RE Spec Sheet"
+    },
+    "stroke_mm": {
+      "value": 67.8,
+      "provenance": "datasheet",
+      "source": "RE Spec Sheet"
+    },
+    "compression_ratio": {
+      "value": 9.5,
+      "provenance": "datasheet",
+      "source": "RE Technical Specifications"
+    },
+    "rod_ratio": {
+      "value": 1.45,
+      "provenance": "assumed",
+      "note": "UNK-GT-019: not published. 1.45 is a typical road-stroker value and affects the rod inertia the crank model uses. Measure it before using the crank model for anything but a first guess."
+    },
+    "crank_layout": {
+      "value": 1,
+      "provenance": "datasheet",
+      "source": "RE Technical Specifications",
+      "note": "parallel 180 degree"
+    },
+    "firing_order": [
+      0,
+      1
+    ]
+  },
+  "trigger": {
+    "crank_teeth": {
+      "value": 36,
+      "provenance": "assumed",
+      "note": "UNK-GT-001: the OEM trigger wheel has not been counted. A 36-1 crank is a common retrofit, NOT a statement about this engine. Count the wheel."
+    },
+    "missing_teeth": {
+      "value": 1,
+      "provenance": "assumed",
+      "note": "follows crank_teeth"
+    },
+    "missing_tooth_index": {
+      "value": 0,
+      "provenance": "assumed",
+      "note": "which tooth is missing; matters only for a custom profile"
+    },
+    "tooth_1_angle_atdc": {
+      "value": 0.0,
+      "provenance": "assumed",
+      "note": "UNK-GT-002: TDC is NOT established. This is the angle the ignition table is timed against, and everything here is provisional until a timing light says otherwise."
+    },
+    "teeth_per_rev": {
+      "value": 1,
+      "provenance": "datasheet",
+      "note": "one crank edge per tooth"
+    },
+    "cam_teeth": {
+      "value": 0,
+      "provenance": "assumed",
+      "note": "UNK-GT-003/G-06: the OEM has no cam sensor. Semi-sequential is used instead of sequential, which does not need one. A track build with cam sync would use 3-1 or 4-1."
+    },
+    "tooth_1_polarity": {
+      "value": 3,
+      "provenance": "assumed",
+      "note": "both conditioners active high; this is how the RACCOON harness presents its edges. A real conditioner may be active low - UNK-GT-004."
+    },
+    "input_filter_level": {
+      "value": 1,
+      "provenance": "assumed",
+      "note": "start conservative and tighten once the noise floor is measured"
+    },
+    "sync_skip_revolutions": {
+      "value": 0,
+      "provenance": "datasheet"
+    }
+  },
+  "hardware": {
+    "injector_peak_a": {
+      "value": 4.0,
+      "provenance": "assumed",
+      "note": "UNK-GT-005: no injector is specified. 4 A is a common high-impedance peak and is a PLACEHOLDER. Injector flow at 4 A is the number the whole fuel model depends on, and it is unknown."
+    },
+    "injector_hold_a": {
+      "value": 1.2,
+      "provenance": "assumed"
+    },
+    "injector_max_duty_pct": {
+      "value": 80.0,
+      "provenance": "assumed",
+      "note": "80 percent, not 100: a duty ceiling with no headroom is a rule violation by design, and a duty that pins the injector open at part throttle is a hot injector"
+    },
+    "injector_count": {
+      "value": 2,
+      "provenance": "datasheet",
+      "note": "one per cylinder, semi-sequential"
+    },
+    "ignition_peak_a": {
+      "value": 7.5,
+      "provenance": "assumed",
+      "note": "UNK-GT-006: the OEM coil is a single coil with an external driver and RACCOON is not assumed compatible with it. This is a smart-coil current."
+    },
+    "ignition_hold_a": {
+      "value": 3.5,
+      "provenance": "assumed"
+    },
+    "ignition_max_dwell_ms": {
+      "value": 8.0,
+      "provenance": "assumed",
+      "note": "needs a thermal and saturation measurement on the actual coil"
+    },
+    "ignition_count": {
+      "value": 2,
+      "provenance": "datasheet"
+    },
+    "spark_divider_ratio": {
+      "value": 9.0,
+      "provenance": "assumed",
+      "note": "primary:secondary turns ratio; sets the spark energy"
+    },
+    "knock_sensor_count": {
+      "value": 0,
+      "provenance": "assumed",
+      "note": "none fitted. Knock control cannot arm with a zero count, which is the schema refusing to claim a feature that is not there."
+    },
+    "wheel_speed_channels": {
+      "value": 0,
+      "provenance": "assumed"
+    },
+    "pedal_channels": {
+      "value": 1,
+      "provenance": "assumed"
+    },
+    "throttle_channels": {
+      "value": 1,
+      "provenance": "assumed",
+      "note": "cable throttle, one TPS. DBW is off; a dual-sensor cable throttle with DBW off is refused as a wiring mistake."
+    },
+    "lambda_channels": {
+      "value": 0,
+      "provenance": "assumed",
+      "note": "UNK-GT-010: the OEM lambda is not established. Closed loop is off, so the ECU runs open loop on a conservative table until a wideband is fitted and measured."
+    },
+    "has_kill_switch": {
+      "value": true,
+      "provenance": "assumed",
+      "note": "assumed present because a road bike has one. CONFIRM THE WIRING: the profile assumes it fails safe, and a switch wired the other way is a switch that does nothing."
+    },
+    "has_boost": {
+      "value": false,
+      "provenance": "datasheet"
+    },
+    "has_vvt": {
+      "value": false,
+      "provenance": "datasheet"
+    },
+    "has_traction": {
+      "value": false,
+      "provenance": "datasheet"
+    },
+    "has_dbw": {
+      "value": false,
+      "provenance": "datasheet"
+    },
+    "ignition_driver_topology": {
+      "value": "smart_coil",
+      "provenance": "assumed",
+      "note": "UNK-GT-006: the OEM is a single coil with an external driver, and RACCOON is NOT assumed compatible with it. A track build would use a smart coil or a wasted-spark pair."
+    },
+    "injector_driver_type": {
+      "value": "high_z_saturated",
+      "provenance": "assumed",
+      "note": "UNK-GT-005: no injector is specified. If the fitted injector is low impedance it needs a peak-and-hold driver, and a high-z saturation driver on a low-z injector is a destroyed driver."
+    }
+  },
+  "limits": {
+    "max_rpm": {
+      "value": 8500,
+      "provenance": "assumed",
+      "note": "street. A track build raises this, and the hardware has to be rated for whatever it is raised to."
+    },
+    "safety_rpm_limit": {
+      "value": 8000,
+      "provenance": "assumed",
+      "note": "the soft cut, below the limiter"
+    },
+    "overspeed_rpm": {
+      "value": 9000,
+      "provenance": "assumed",
+      "note": "the hard fault"
+    },
+    "idle_rpm": {
+      "value": 1100,
+      "provenance": "assumed"
+    },
+    "ignition_min_deg": {
+      "value": -10.0,
+      "provenance": "assumed",
+      "note": "hard envelope; the ignition table cannot command outside it"
+    },
+    "ignition_max_deg": {
+      "value": 30.0,
+      "provenance": "assumed"
+    },
+    "lean_lambda_limit": {
+      "value": 1.25,
+      "provenance": "assumed"
+    },
+    "rich_lambda_limit": {
+      "value": 0.75,
+      "provenance": "assumed"
+    },
+    "boost_max_kpa": {
+      "value": 101.3,
+      "provenance": "datasheet",
+      "note": "naturally aspirated: atmospheric"
+    }
+  },
+  "injection_strategy": "semi-sequential",
+  "ignition_strategy": "static_table",
+  "idle_strategy": "pwm_iac",
+  "lambda_strategy": "off"
+}

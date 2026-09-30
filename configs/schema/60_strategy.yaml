@@ -1,0 +1,384 @@
+# RACCOON V2 - strategy selection, input channel inventory and the hard ignition envelope.
+#
+# These items exist because the rest of the schema cannot be made safe without them:
+# a strategy that implies hardware which is not fitted must be refused (docs/IO_MATRIX.md
+# section 6, CALIBRATION_SPEC.md section 6), and the ignition command needs a hard
+# envelope that no combination of corrections can exceed (spec section 31).
+schema_version: 1
+
+groups:
+  - name: strategy
+    base_id: 0x1800
+    items:
+      - name: injection_strategy
+        id: 0x1800
+        type: enum
+        default: 1
+        owner: ENGINEER
+        safety_class: CRITICAL
+        live_edit: false
+        default_source: UNVERIFIED
+        description: >-
+          Injection firing mode. Sequential requires a valid cylinder phase source
+          (cam sync, or a crank gap that fixes the 720 degree cycle); without one the ECU
+          refuses to arm, because injecting into an exhaust stroke destroys an engine.
+
+        values:
+          - {name: batch, value: 0, description: All injectors fire together; needs only RPM}
+          - {name: semi_sequential, value: 1, description: Pairs fire together, alternating per cycle}
+          - {name: sequential, value: 2, description: One injector per cylinder at its intake stroke}
+          - {name: staged, value: 3, description: Sequential plus a secondary injector per cylinder}
+
+      - name: lambda_strategy
+        id: 0x1801
+        type: enum
+        default: 0
+        owner: ENGINEER
+        safety_class: HIGH
+        live_edit: false
+        default_source: UNVERIFIED
+        description: >-
+          Lambda strategy. Narrowband is explicitly NOT treated as a wide-range AFR
+          measurement (FUEL_SPEC section 8); native wideband requires a physically
+          present CJ125 plus LSU 4.9 pair (CAP_WIDEBAND).
+
+        values:
+          - {name: "off", value: 0, description: Open loop only}
+          - {name: narrowband, value: 1, description: 0-1 V switching sensor, on/off or slow trim}
+          - {name: wideband_external_analog, value: 2, description: External controller, 0-5 V}
+          - {name: wideband_external_can, value: 3, description: External controller over CAN}
+          - {name: wideband_native_cj125, value: 4, description: On-board CJ125 + LSU 4.9}
+
+      - name: dbw_strategy
+        id: 0x1802
+        type: enum
+        default: 0
+        owner: ENGINEER
+        safety_class: CRITICAL
+        live_edit: false
+        default_source: UNVERIFIED
+        description: >-
+          Electronic throttle. A cable throttle is NOT electronically controllable and
+          must never be presented as DBW; without the pedal, motor and dual-channel
+          redundancy hardware this stays 'off' (spec section 38, 44).
+
+        values:
+          - {name: "off", value: 0, description: Cable throttle, the ECU has no actuator}
+          - {name: hbridge_position_control, value: 1, description: Two H-bridges, dual pedal channels}
+
+      - name: shift_request_source
+        id: 0x1803
+        type: enum
+        default: 0
+        owner: ENGINEER
+        safety_class: MEDIUM
+        live_edit: false
+        default_source: UNVERIFIED
+        description: >-
+          What tells the ECU a shift is wanted. Flat shift and auto-blip are impossible
+          without a request source; the ECU does not invent one (spec section 43, 44).
+
+        values:
+          - {name: none, value: 0}
+          - {name: switch, value: 1, description: Paddle or handlebar switch}
+          - {name: strain_gauge, value: 2, description: Gearbox load cell}
+          - {name: can, value: 3, description: A transmission/gearbox ECU over CAN}
+
+      - name: lambda_channel_count
+        id: 0x1804
+        type: u8
+        default: 0
+        min: 0
+        max: 4
+        owner: ENGINEER
+        safety_class: HIGH
+        live_edit: false
+        default_source: UNVERIFIED
+        description: >-
+          Physically fitted lambda channels. Per-cylinder lambda is only claimed when a
+          channel exists per cylinder; a single common-exhaust sensor is never
+          demultiplexed into per-cylinder values without a validated methodology
+          (FUEL_SPEC section 8, UNK-FW-009).
+
+      - name: knock_sensor_count
+        id: 0x1805
+        type: u8
+        default: 0
+        min: 0
+        max: 2
+        owner: ENGINEER
+        safety_class: HIGH
+        live_edit: false
+        default_source: UNVERIFIED
+        description: >-
+          Physically fitted knock sensors. No sensor means no knock claim, ever
+          (spec section 34).
+
+      - name: wheel_speed_channel_count
+        id: 0x1806
+        type: u8
+        default: 0
+        min: 0
+        max: 2
+        owner: ENGINEER
+        safety_class: MEDIUM
+        live_edit: false
+        default_source: UNVERIFIED
+        description: >-
+          Fitted wheel speed channels. Traction control needs both axles to compute
+          slip; one channel is enough for speed alone (spec section 45).
+
+      - name: pedal_channel_count
+        id: 0x1807
+        type: u8
+        default: 0
+        min: 0
+        max: 2
+        owner: ENGINEER
+        safety_class: CRITICAL
+        live_edit: false
+        default_source: UNVERIFIED
+        description: Pedal position channels. DBW requires two for redundancy.
+
+      - name: throttle_channel_count
+        id: 0x1808
+        type: u8
+        default: 1
+        min: 1
+        max: 2
+        owner: ENGINEER
+        safety_class: HIGH
+        live_edit: false
+        default_source: UNVERIFIED
+        description: >-
+          Throttle position channels. Two are required for DBW plausibility; one is
+          normal for a cable throttle (spec section 17).
+
+      - name: clutch_switch_present
+        id: 0x1809
+        type: bool
+        default: 0
+        owner: ENGINEER
+        safety_class: MEDIUM
+        live_edit: false
+        default_source: UNVERIFIED
+        description: >-
+          A clutch lever switch is fitted. Used for launch, flat shift and rev matching
+          (spec section 43).
+
+      - name: ignition_hard_min_deg
+        id: 0x180A
+        type: f32
+        unit: deg
+        scale: 1.0
+        default: -10.0
+        min: -40.0
+        max: 20.0
+        owner: SAFETY
+        safety_class: CRITICAL
+        live_edit: false
+        default_source: UNVERIFIED
+        description: >-
+          Lower bound of the hard ignition envelope. The final commanded advance is
+          clamped into [ignition_hard_min_deg, ignition_hard_max_deg] AFTER every
+          correction and every user trim, so no combination of trims can exceed it
+          (spec section 31, CALIBRATION_SPEC section 110). Engineering mode may only
+          narrow this envelope, never widen it.
+
+      - name: ignition_hard_max_deg
+        id: 0x180B
+        type: f32
+        unit: deg
+        scale: 1.0
+        default: 35.0
+        min: 0.0
+        max: 60.0
+        owner: SAFETY
+        safety_class: CRITICAL
+        live_edit: false
+        default_source: UNVERIFIED
+        description: Upper bound of the hard ignition envelope. See ignition_hard_min_deg.
+
+      - name: cam_phase_verified
+        id: 0x180C
+        type: bool
+        default: 0
+        owner: ENGINEER
+        safety_class: CRITICAL
+        live_edit: false
+        default_source: UNVERIFIED
+        description: >-
+          Set by the bench TDC procedure or the GUI TDC tool, never by the tuner, once
+          the cam reference edge has been observed at a known TDC. The arming gate
+          requires this for sequential injection and for the STROKE_DIRECTION item
+          (spec section 98, GT650-001 section 4). Register UNK-GT-002, UNK-GT-003.
+
+      - name: tdc_verified
+        id: 0x180D
+        type: bool
+        default: 0
+        owner: ENGINEER
+        safety_class: CRITICAL
+        live_edit: false
+        default_source: UNVERIFIED
+        description: >-
+          Set once the timing light agrees with the ECU's reported crank angle at a
+          known RPM. Until this is set, the configuration is not armable: a wrong
+          trigger angle is the single most damaging miscalibration in the product
+          (spec section 98). Register UNK-GT-001.
+
+  - name: switches
+    base_id: 0x1900
+    items:
+      - name: kill_switch_present
+        id: 0x1900
+        type: bool
+        default: 0
+        owner: ENGINEER
+        safety_class: CRITICAL
+        live_edit: false
+        default_source: UNVERIFIED
+        description: A kill switch is fitted. Engine control must not arm while it is active.
+
+      - name: kill_switch_active_high
+        id: 0x1901
+        type: bool
+        default: 1
+        owner: ENGINEER
+        safety_class: HIGH
+        live_edit: false
+        default_source: UNVERIFIED
+        description: >-
+          Which level means 'kill asserted'. A broken wire on a normally-closed kill circuit
+          must present as 'engine may run', so the polarity is an explicit calibration rather
+          than a default guess (SENSOR_SPEC section 5).
+
+      - name: kill_switch_fault_behaviour
+        id: 0x1902
+        type: enum
+        default: 1
+        owner: ENGINEER
+        safety_class: CRITICAL
+        live_edit: false
+        default_source: UNVERIFIED
+        description: >-
+          What a broken or missing kill-switch signal does. 'ignore' is refused by the schema
+          rules: a build that cannot tell whether the rider asked to stop is unsafe.
+        values:
+          - {name: ignore, value: 0, description: REFUSED by the build-time rules}
+          - {name: inhibit_output, value: 1, description: Treat as kill asserted, cut fuel and spark}
+          - {name: allow_start_only, value: 2, description: Inhibit while running, allow while stopped}
+
+      - name: brake_switch_present
+        id: 0x1903
+        type: bool
+        default: 0
+        owner: ENGINEER
+        safety_class: MEDIUM
+        live_edit: false
+        default_source: UNVERIFIED
+        description: >-
+          A brake input is fitted. Used as a traction-control reference and to inhibit
+          rev matching and the pit limiter (spec section 45, 47).
+
+      - name: brake_switch_active_high
+        id: 0x1904
+        type: bool
+        default: 1
+        owner: ENGINEER
+        safety_class: MEDIUM
+        live_edit: false
+        default_source: UNVERIFIED
+        description: Which level means 'brake applied'.
+
+      - name: side_stand_present
+        id: 0x1905
+        type: bool
+        default: 0
+        owner: ENGINEER
+        safety_class: MEDIUM
+        live_edit: false
+        default_source: UNVERIFIED
+        description: >-
+          A side-stand switch is fitted. Usually retained by the OEM ECU; the RACCOON input
+          exists so the tuner can see its state in logs and diagnostics.
+
+      - name: side_stand_active_high
+        id: 0x1906
+        type: bool
+        default: 1
+        owner: ENGINEER
+        safety_class: MEDIUM
+        live_edit: false
+        default_source: UNVERIFIED
+        description: Which level means 'stand down'.
+
+      - name: launch_button_present
+        id: 0x1907
+        type: bool
+        default: 0
+        owner: ENGINEER
+        safety_class: MEDIUM
+        live_edit: false
+        default_source: UNVERIFIED
+        description: A launch button is fitted. Without one, launch control has no request source.
+
+      - name: launch_button_active_high
+        id: 0x1908
+        type: bool
+        default: 1
+        owner: ENGINEER
+        safety_class: MEDIUM
+        live_edit: false
+        default_source: UNVERIFIED
+        description: Which level means 'launch requested'.
+
+      - name: pit_switch_present
+        id: 0x1909
+        type: bool
+        default: 0
+        owner: ENGINEER
+        safety_class: MEDIUM
+        live_edit: false
+        default_source: UNVERIFIED
+        description: A pit-lane switch is fitted (spec section 47).
+
+      - name: pit_switch_active_high
+        id: 0x190A
+        type: bool
+        default: 1
+        owner: ENGINEER
+        safety_class: MEDIUM
+        live_edit: false
+        default_source: UNVERIFIED
+        description: Which level means 'pit limiter armed'.
+
+      - name: switch_debounce_ms
+        id: 0x190B
+        type: u16
+        unit: ms
+        scale: 1.0
+        default: 20
+        min: 1
+        max: 200
+        owner: TUNER
+        safety_class: MEDIUM
+        default_source: UNVERIFIED
+        description: >-
+          Shared debounce window for the switch inputs. A real filter with a bounded window,
+          not a single sample (SENSOR_SPEC section 5).
+
+      - name: switch_timeout_ms
+        id: 0x190C
+        type: u16
+        unit: ms
+        scale: 1.0
+        default: 5000
+        min: 100
+        max: 30000
+        owner: TUNER
+        safety_class: MEDIUM
+        default_source: UNVERIFIED
+        description: >-
+          No-transition timeout for switch inputs. A signal that never changes for this long
+          is reported stale; it is never silently treated as valid.

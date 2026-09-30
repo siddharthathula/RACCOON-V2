@@ -1,0 +1,916 @@
+# RACCOON V2 - torque arbitration bounds, launch, shift, traction, engine braking,
+# pit limiter and drive modes.
+# Single source of truth for the firmware image and the tuner. See docs/CALIBRATION_SPEC.md.
+schema_version: 1
+
+groups:
+  - name: torque
+    base_id: 0x0E00
+    items:
+      # The precedence table itself (TQM-001 R2) is compile-time and normative: an
+      # ordering that can be tuned is not an ordering. What is calibrated here is the
+      # *magnitude* of the arbitration - its bounds, its resolution, and the mapping
+      # from lost torque authority to timing, which is engine-specific and therefore
+      # has to be measured rather than assumed.
+      - name: torque_scale_min
+        id: 0x0E00
+        type: f32
+        default: 0.0
+        min: 0.0
+        max: 1.0
+        owner: ENGINEER
+        safety_class: HIGH
+        default_source: UNVERIFIED
+        description: >-
+          Lowest authority a requester may reduce to. 0.0 is a cut; a product that
+          cannot express a cut through the same path it uses for a 5 % reduction is a
+          product with two paths to get the arbitration wrong.
+      - name: torque_scale_max
+        id: 0x0E01
+        type: f32
+        default: 1.0
+        min: 0.0
+        max: 1.0
+        owner: ENGINEER
+        safety_class: CRITICAL
+        default_source: UNVERIFIED
+        description: >-
+          Ceiling of the scale. It is 1.0 and it cannot exceed 1.0: arbitration scales
+          *requests*, and there is no requester that may raise one above the base
+          request (TQM-001 R4).
+      - name: torque_reduction_step
+        id: 0x0E02
+        type: f32
+        default: 0.01
+        min: 0.001
+        max: 1.0
+        owner: ENGINEER
+        safety_class: MEDIUM
+        default_source: UNVERIFIED
+        description: >-
+          Resolution of the emitted scale. Coarse steps make a continuous requester
+          (traction) quantised, which shows up as a hunting driveline; too fine a step
+          costs nothing but hides the fact that a "continuous" request is a sampled one.
+      - name: retard_per_unit_torque_loss
+        id: 0x0E03
+        type: f32
+        unit: deg
+        default: 5.0
+        min: 0.0
+        max: 30.0
+        owner: TUNER
+        safety_class: HIGH
+        default_source: UNVERIFIED
+        description: >-
+          Timing removed per unit of (1 - allowed_scale) when fuel has been cut. This is
+          the retard_equivalent of TQM-001 sec.3, and it is explicitly *not* a guess:
+          the relationship between advance and torque is engine-specific, so this number
+          has to come from a measured torque curve, not from a rule of thumb.
+      - name: retard_equivalent_max_deg
+        id: 0x0E04
+        type: f32
+        unit: deg
+        default: 12.0
+        min: 0.0
+        max: 30.0
+        owner: TUNER
+        safety_class: HIGH
+        default_source: UNVERIFIED
+        description: >-
+          Ceiling on the retard_equivalent term. A fully cut fuel request must not also
+          remove unbounded spark, or a rev limiter would command a total loss of
+          combustion rather than a controlled one.
+      - name: requester_enable_bits
+        id: 0x0E05
+        type: bits
+        default: 65535
+        owner: ENGINEER
+        safety_class: CRITICAL
+        default_source: UNVERIFIED
+        description: >-
+          Which requesters are wired into the arbiter, in the fixed rank order of
+          TQM-001 R2. This is an *enable* mask, not a reordering: clearing a bit
+          removes a requester, and no arrangement of these bits can change which
+          requester wins. Bit 0 is the strongest reduction.
+        bits:
+          - sync_loss_inhibit
+          - engine_protection
+          - knock_escalation
+          - lean_limit
+          - thermal_derate
+          - rev_limiter
+          - traction_control
+          - shift_cut
+          - launch_control
+          - boost_protection
+          - sensor_fallback
+          - engine_braking
+          - rider_request
+          - pit_limiter
+          - oil_pressure
+          - fuel_pressure
+      - name: torque_latch_max_ms
+        id: 0x0E06
+        type: u32
+        unit: ms
+        default: 30000
+        min: 100
+        max: 6000000
+        owner: ENGINEER
+        safety_class: HIGH
+        default_source: UNVERIFIED
+        description: >-
+          Maximum lifetime of any latching request (TQM-001 R7). A latch with no
+          release path is a prohibited defect - it is a slow brick in software form -
+          so the bound is structural and applies to every requester at once.
+      - name: torque_trace_enabled
+        id: 0x0E07
+        type: bool
+        default: 1
+        owner: ENGINEER
+        safety_class: MEDIUM
+        default_source: UNVERIFIED
+        description: >-
+          Emit the arbitration trace: winning requester, applied scale, ignition
+          request, fuel request. Traceability is the difference between an arbitration
+          table that is meaningful and one that is aspirational (R6, test TM9). On by
+          default because it is cheap and it is the only way to explain a single
+          cylinder's behaviour after the fact.
+
+  - name: launch
+    base_id: 0x0F00
+    items:
+      - name: launch_enabled
+        id: 0x0F00
+        type: bool
+        default: 0
+        owner: TUNER
+        safety_class: HIGH
+        default_source: UNVERIFIED
+        description: >-
+          Off by default: launch control also needs a clutch or shift switch, and
+          neither is known to be fitted. Register UNK-GT-016.
+      - name: launch_target_rpm
+        id: 0x0F01
+        type: u16
+        unit: rpm
+        default: 5000
+        min: 1000
+        max: 12000
+        owner: TUNER
+        safety_class: HIGH
+        default_source: UNVERIFIED
+        description: >-
+          Engine speed held during a launch. It is a *request* through the torque
+          manager, so a rev limiter or a knock event at that speed wins without any
+          special case.
+      - name: launch_hold_rpm_band
+        id: 0x0F02
+        type: u16
+        unit: rpm
+        default: 400
+        min: 50
+        max: 3000
+        owner: TUNER
+        safety_class: MEDIUM
+        default_source: UNVERIFIED
+      - name: launch_retard_deg
+        id: 0x0F03
+        type: f32
+        unit: deg
+        default: 8.0
+        min: 0.0
+        max: 30.0
+        owner: TUNER
+        safety_class: HIGH
+        default_source: UNVERIFIED
+        description: >-
+          Retard applied while the launch is engaged. Under load a launch develops far
+          more torque than a cruise at the same rpm, and launching at cruise timing is
+          how the first clutch bite destroys a clutch.
+      - name: launch_torque_scale
+        id: 0x0F04
+        type: f32
+        default: 0.6
+        min: 0.0
+        max: 1.0
+        owner: TUNER
+        safety_class: HIGH
+        default_source: UNVERIFIED
+        description: Ceiling on the authority a launch may request.
+      - name: launch_ramp_time_ms
+        id: 0x0F05
+        type: u16
+        unit: ms
+        default: 2000
+        min: 0
+        max: 60000
+        owner: TUNER
+        safety_class: MEDIUM
+        default_source: UNVERIFIED
+        description: >-
+          Time to reach the launch authority. A step from idle to full launch torque
+          shakes the bike and is how a rider loses it; a ramp is a calibration, not a
+          safety limit.
+      - name: launch_timeout_ms
+        id: 0x0F06
+        type: u16
+        unit: ms
+        default: 5000
+        min: 100
+        max: 60000
+        owner: TUNER
+        safety_class: HIGH
+        default_source: UNVERIFIED
+        description: >-
+          Maximum time a launch may remain engaged. A launch control that never ends is
+          a rev limiter with a worse personality.
+      - name: launch_abort_torque_scale
+        id: 0x0F07
+        type: f32
+        default: 0.0
+        min: 0.0
+        max: 1.0
+        owner: TUNER
+        safety_class: HIGH
+        default_source: UNVERIFIED
+        description: >-
+          Authority on abort - clutch dump, brake applied, or the timeout. The abort
+          path is what makes a launch a bounded feature rather than a condition.
+      - name: launch_wheelie_mitigation_enabled
+        id: 0x0F08
+        type: bool
+        default: 0
+        owner: TUNER
+        safety_class: MEDIUM
+        default_source: UNVERIFIED
+        description: >-
+          Wheelie mitigation only if the hardware supports the required input. With no
+          IMU and no fork-travel input there is nothing to mitigate with, and offering
+          the feature anyway would be a fabricated capability.
+      - name: launch_wheelie_front_lift_gain
+        id: 0x0F09
+        type: f32
+        default: 0.5
+        min: 0.0
+        max: 5.0
+        owner: TUNER
+        safety_class: MEDIUM
+        default_source: UNVERIFIED
+        description: Reduction per unit of front-lift signal, when such a signal exists.
+      - name: launch_fuel_trim_pct
+        id: 0x0F0A
+        type: f32
+        unit: "%"
+        default: 5.0
+        min: -50.0
+        max: 50.0
+        owner: TUNER
+        safety_class: MEDIUM
+        default_source: UNVERIFIED
+        description: >-
+          Small fuelling trim during a launch. Deliberately tiny: most launches want
+          *less* mixture than cruise because of the heat soak, and a large trim is a
+          flooding risk on a bike that is barely moving.
+      - name: launch_min_speed_kph
+        id: 0x0F0B
+        type: f32
+        unit: "km/h"
+        default: 0.0
+        min: 0.0
+        max: 100.0
+        owner: TUNER
+        safety_class: MEDIUM
+        default_source: UNVERIFIED
+        description: Road speed below which a launch is not permitted to engage.
+      - name: launch_max_boost_kpa
+        id: 0x0F0C
+        type: f32
+        unit: kPa
+        default: 100.0
+        min: 0.0
+        max: 500.0
+        owner: TUNER
+        safety_class: MEDIUM
+        default_source: UNVERIFIED
+        description: >-
+          Boost ceiling during a launch. Drag starts can legitimately ask for more than
+          street boost, and the safety limit still applies unchanged above this.
+
+  - name: shift
+    base_id: 0x1000
+    items:
+      - name: shift_strategy
+        id: 0x1000
+        type: enum
+        default: 1
+        owner: TUNER
+        safety_class: HIGH
+        default_source: UNVERIFIED
+        description: >-
+          What a quickshift actually removes. Fuel cut is the default because it is
+          what a mechanical fuel-injected engine recovers from fastest; spark cut is
+          gentler on the driveline but must never be allowed to overlap a traction cut.
+        values:
+          - {name: spark_cut, value: 0, description: No spark for the shift duration}
+          - {name: fuel_cut, value: 1, description: Injectors closed for the shift duration}
+          - {name: both, value: 2, description: Spark and fuel, for a two-wheel-drag clutchless shift}
+      - name: shift_max_cut_ms
+        id: 0x1001
+        type: u16
+        unit: ms
+        default: 120
+        min: 5
+        max: 2000
+        owner: TUNER
+        safety_class: HIGH
+        default_source: UNVERIFIED
+        description: >-
+          Duration-bounded cut. The shift is a requester with a bounded lifetime, so a
+          shift that never completes cannot leave the engine without fuel.
+      - name: shift_min_time_between_ms
+        id: 0x1002
+        type: u16
+        unit: ms
+        default: 400
+        min: 50
+        max: 10000
+        owner: TUNER
+        safety_class: MEDIUM
+        default_source: UNVERIFIED
+        description: >-
+          Minimum time between two shifts. A bouncing switch or a noisy paddle must not
+          be able to open a cut every cycle.
+      - name: shift_recovery_torque_scale
+        id: 0x1003
+        type: f32
+        default: 0.7
+        min: 0.0
+        max: 1.0
+        owner: TUNER
+        safety_class: HIGH
+        default_source: UNVERIFIED
+        description: >-
+          Authority during shift recovery. Ramped back rather than returned at once, so
+          the re-engagement does not arrive as a second torque step.
+      - name: shift_blip_enabled
+        id: 0x1004
+        type: bool
+        default: 0
+        owner: TUNER
+        safety_class: MEDIUM
+        default_source: UNVERIFIED
+        description: >-
+          Auto-blip on downshift. Needs a clutch lever switch, which is not known to be
+          fitted. Register UNK-GT-016.
+      - name: shift_blip_duration_ms
+        id: 0x1005
+        type: u16
+        unit: ms
+        default: 150
+        min: 10
+        max: 2000
+        owner: TUNER
+        safety_class: MEDIUM
+        default_source: UNVERIFIED
+      - name: shift_blip_torque_scale
+        id: 0x1006
+        type: f32
+        default: 0.8
+        min: 0.0
+        max: 1.0
+        owner: TUNER
+        safety_class: MEDIUM
+        default_source: UNVERIFIED
+        description: >-
+          Authority during the blip. A blip is a throttle-matching event; giving it full
+          authority is a clutch dump with extra steps.
+      - name: shift_min_rpm
+        id: 0x1007
+        type: u16
+        unit: rpm
+        default: 3000
+        min: 0
+        max: 20000
+        owner: TUNER
+        safety_class: MEDIUM
+        default_source: UNVERIFIED
+        description: Below this rpm a shift is ignored; there is nothing to gain.
+      - name: shift_tps_threshold_pct
+        id: 0x1008
+        type: f32
+        unit: "%"
+        default: 20.0
+        min: 0.0
+        max: 100.0
+        owner: TUNER
+        safety_class: MEDIUM
+        default_source: UNVERIFIED
+        description: >-
+          Minimum throttle opening for a shift to count as deliberate. Coasting
+          downshifts are a different event with different consequences.
+      - name: shift_release_timeout_ms
+        id: 0x1009
+        type: u16
+        unit: ms
+        default: 1000
+        min: 50
+        max: 10000
+        owner: TUNER
+        safety_class: HIGH
+        default_source: UNVERIFIED
+        description: >-
+          If the gear or clutch condition that ends the shift never arrives, this ends
+          it. The re-enable predicate is bounded in time as well as in condition.
+
+  - name: traction
+    base_id: 0x1100
+    items:
+      - name: traction_enabled
+        id: 0x1100
+        type: bool
+        default: 0
+        owner: TUNER
+        safety_class: HIGH
+        default_source: UNVERIFIED
+        description: >-
+          Off by default: traction control needs front *and* rear wheel speed, and no
+          ABS sensor is known to exist on this bike. Register UNK-GT-014. The GUI hides
+          the workspace entirely when CAP_TRACTION is off.
+      - name: traction_slip_target_pct
+        id: 0x1101
+        type: f32
+        unit: "%"
+        default: 8.0
+        min: 0.0
+        max: 100.0
+        owner: TUNER
+        safety_class: HIGH
+        default_source: UNVERIFIED
+        description: >-
+          Allowed slip ratio difference, percent, between driven and reference wheel.
+          The number itself is a rider-preference compromise between fast and stable.
+      - name: traction_slip_ramp_pct_per_s
+        id: 0x1102
+        type: f32
+        unit: "%/s"
+        default: 20.0
+        min: 0.1
+        max: 500.0
+        owner: TUNER
+        safety_class: HIGH
+        default_source: UNVERIFIED
+        description: >-
+          Slew rate on the target. A step target is a step torque demand, and a step
+          torque demand on a rear tyre is a spin.
+      - name: traction_gear_correction
+        id: 0x1103
+        type: f32
+        default: 1.0
+        min: 0.1
+        max: 3.0
+        owner: TUNER
+        safety_class: MEDIUM
+        default_source: UNVERIFIED
+        description: >-
+          Multiplier on the slip target in first gear, where slip is physically larger
+          and the target has to be looser to be stable.
+      - name: traction_speed_correction_kph
+        id: 0x1104
+        type: f32
+        unit: "km/h"
+        default: 40.0
+        min: 0.0
+        max: 400.0
+        owner: TUNER
+        safety_class: MEDIUM
+        default_source: UNVERIFIED
+        description: >-
+          Speed at which the correction reaches full effect. Below it the target is
+          tightened, because at walking pace a slip ratio is noise.
+      - name: traction_rpm_correction
+        id: 0x1105
+        type: f32
+        default: 1.0
+        min: 0.1
+        max: 3.0
+        owner: TUNER
+        safety_class: MEDIUM
+        default_source: UNVERIFIED
+        description: >-
+          Multiplier on the slip target with engine speed, to account for the extra
+          inertia the rear wheel has to work with.
+      - name: traction_min_slip_to_act
+        id: 0x1106
+        type: f32
+        unit: "%"
+        default: 3.0
+        min: 0.0
+        max: 100.0
+        owner: TUNER
+        safety_class: HIGH
+        default_source: UNVERIFIED
+        description: >-
+          Below this the controller does not act at all. Without it the loop chases
+          sensor noise at zero slip and the rider feels an engine that is mysteriously
+          hesitating.
+      - name: traction_intervention_hold_ms
+        id: 0x1107
+        type: u16
+        unit: ms
+        default: 100
+        min: 10
+        max: 5000
+        owner: TUNER
+        safety_class: HIGH
+        default_source: UNVERIFIED
+        description: >-
+          Minimum time the control stays engaged after an intervention, so it does not
+          chatter on and off as the tyre oscillates across the target.
+      - name: traction_gain
+        id: 0x1108
+        type: f32
+        default: 1.0
+        min: 0.0
+        max: 20.0
+        owner: TUNER
+        safety_class: HIGH
+        default_source: UNVERIFIED
+        description: Authority per unit slip error; it becomes a torque-manager request.
+      - name: traction_retard_max_deg
+        id: 0x1109
+        type: f32
+        unit: deg
+        default: 8.0
+        min: 0.0
+        max: 30.0
+        owner: TUNER
+        safety_class: HIGH
+        default_source: UNVERIFIED
+        description: Ceiling on the retard the traction requester may add.
+      - name: traction_min_speed_kph
+        id: 0x110A
+        type: f32
+        unit: "km/h"
+        default: 5.0
+        min: 0.0
+        max: 200.0
+        owner: TUNER
+        safety_class: MEDIUM
+        default_source: UNVERIFIED
+        description: >-
+          Below this the controller is disabled. A two-wheel speed difference at 3 km/h
+          is a speedometer discrepancy, not a slide.
+      - name: traction_wheel_timeout_ms
+        id: 0x110B
+        type: u16
+        unit: ms
+        default: 200
+        min: 10
+        max: 5000
+        owner: TUNER
+        safety_class: HIGH
+        default_source: UNVERIFIED
+        description: >-
+          Freshness limit on the wheel-speed sources. A stale wheel reading is worse
+          than none: the controller would act confidently on a value from half a second
+          ago.
+        dependencies: [traction_enabled]
+
+  - name: ebt
+    base_id: 0x1200
+    items:
+      # Engine braking is the one *additive* requester in the torque manager: it
+      # increases retard and reduces fuel under overrun, bounded by a table.
+      - name: engine_braking_enabled
+        id: 0x1200
+        type: bool
+        default: 0
+        owner: TUNER
+        safety_class: MEDIUM
+        default_source: UNVERIFIED
+        description: >-
+          Off by default. On a motorcycle with twin carburettors the engine brake is
+          usually the rider's own right foot; enabling a fuel-cut-based engine brake
+          changes the bike's character permanently, so it is opt-in.
+      - name: ebt_retard_table
+        id: 0x1201
+        type: table2d
+        owner: TUNER
+        safety_class: HIGH
+        default_source: UNVERIFIED
+        alloc_rows: 8
+        alloc_cols: 8
+        cell_type: f32
+        cell_min: -12.0
+        cell_max: 12.0
+        row_axis: gear
+        col_axis: rpm
+        description: >-
+          Retard on overrun against gear and rpm. Positive advances and negative
+          retards, so the sign convention matches the rest of the ignition corrections
+          and does not need its own explanation in a log.
+
+      - name: ebt_retard_table_gear_axis
+        id: 0x1207
+        type: axis1d
+        owner: TUNER
+        safety_class: HIGH
+        default_source: UNVERIFIED
+        alloc_count: 8
+        cell_type: u16
+        cell_min: 1
+        cell_max: 8
+        axis_first: 1
+        unit: gear
+        description: >-
+          gear breakpoints for ebt_retard_table: 8 of them, strictly increasing.
+          These are the coordinates the table is interpolated along, and they live
+          in the calibration rather than in the firmware so a tuner can put the
+          resolution where the engine actually spends its time - at idle, usually,
+          rather than spread evenly across a range it never visits.
+
+      - name: ebt_retard_table_rpm_axis
+        id: 0x1208
+        type: axis1d
+        owner: TUNER
+        safety_class: HIGH
+        default_source: UNVERIFIED
+        alloc_count: 8
+        cell_type: u16
+        cell_min: 1000
+        cell_max: 12000
+        axis_first: 1000
+        unit: rpm
+        description: >-
+          rpm breakpoints for ebt_retard_table: 8 of them, strictly increasing.
+          These are the coordinates the table is interpolated along, and they live
+          in the calibration rather than in the firmware so a tuner can put the
+          resolution where the engine actually spends its time - at idle, usually,
+          rather than spread evenly across a range it never visits.
+      - name: ebt_fuel_cut_tps_pct
+        id: 0x1202
+        type: f32
+        unit: "%"
+        default: 0.5
+        min: 0.0
+        max: 20.0
+        owner: TUNER
+        safety_class: MEDIUM
+        default_source: UNVERIFIED
+      - name: ebt_fuel_cut_map_kpa
+        id: 0x1203
+        type: f32
+        unit: kPa
+        default: 35.0
+        min: 0.0
+        max: 150.0
+        owner: TUNER
+        safety_class: MEDIUM
+        default_source: UNVERIFIED
+        description: >-
+          Manifold pressure below which overrun fuel cut applies. As with the decel
+          cut, this is the *engine braking* threshold, which is deliberately
+          tighter than the ordinary overrun cut.
+      - name: ebt_min_rpm
+        id: 0x1204
+        type: u16
+        unit: rpm
+        default: 2500
+        min: 500
+        max: 20000
+        owner: TUNER
+        safety_class: HIGH
+        default_source: UNVERIFIED
+        description: >-
+          Below this, engine braking is off: a lean mixture at low rpm is a stumble,
+          not a brake, and a stumble under a closed throttle is how a bike gets
+          dropped at a junction.
+      - name: ebt_max_torque_scale
+        id: 0x1205
+        type: f32
+        default: 0.3
+        min: 0.0
+        max: 1.0
+        owner: TUNER
+        safety_class: HIGH
+        default_source: UNVERIFIED
+        description: >-
+          Floor on the allowed scale while the engine brake is active. Bounded above
+          zero so a mid-corner downshift cannot command a total loss of drive.
+      - name: ebt_recovery_tau_ms
+        id: 0x1206
+        type: u16
+        unit: ms
+        default: 300
+        min: 10
+        max: 10000
+        owner: TUNER
+        safety_class: MEDIUM
+        default_source: UNVERIFIED
+        description: >-
+          Time constant for handing authority back on throttle return. Slow enough
+          that releasing the throttle does not feel like a torque step.
+
+  - name: pit
+    base_id: 0x1300
+    items:
+      - name: pit_limiter_enabled
+        id: 0x1300
+        type: bool
+        default: 0
+        owner: TUNER
+        safety_class: HIGH
+        default_source: UNVERIFIED
+        description: >-
+          Off by default. A pit limiter that cannot be disengaged is a safety defect
+          in itself, so the disengage path is defined and tested before the feature is
+          offered at all (TQM-001 sec.5, test TM11).
+      - name: pit_target_speed_kph
+        id: 0x1301
+        type: f32
+        unit: "km/h"
+        default: 60.0
+        min: 0.0
+        max: 500.0
+        owner: TUNER
+        safety_class: HIGH
+        default_source: UNVERIFIED
+      - name: pit_target_rpm
+        id: 0x1302
+        type: u16
+        unit: rpm
+        default: 4000
+        min: 0
+        max: 20000
+        owner: TUNER
+        safety_class: HIGH
+        default_source: UNVERIFIED
+        description: >-
+          Speed target needs a wheel-speed source, which this bike may not have; the
+          rpm target works without one and is the safer of the two.
+      - name: pit_speed_hysteresis_kph
+        id: 0x1303
+        type: f32
+        unit: "km/h"
+        default: 2.0
+        min: 0.0
+        max: 50.0
+        owner: TUNER
+        safety_class: HIGH
+        default_source: UNVERIFIED
+        description: >-
+          Hysteresis, so the limiter does not chatter on and off around the target as
+          the bike accelerates through it in a straight line.
+      - name: pit_rpm_hysteresis
+        id: 0x1304
+        type: u16
+        unit: rpm
+        default: 200
+        min: 0
+        max: 3000
+        owner: TUNER
+        safety_class: HIGH
+        default_source: UNVERIFIED
+      - name: pit_gear_override_enabled
+        id: 0x1305
+        type: bool
+        default: 0
+        owner: TUNER
+        safety_class: MEDIUM
+        default_source: UNVERIFIED
+        description: >-
+          Use per-gear rpm limits instead of the single rpm target. Useful on a
+          circuit where the same engine speed means different things in different
+          gears, but it depends on knowing the gear.
+        dependencies: [gear_ratio_count]
+      - name: pit_gear1_target_rpm
+        id: 0x1306
+        type: u16
+        unit: rpm
+        default: 5000
+        min: 0
+        max: 20000
+        owner: TUNER
+        safety_class: MEDIUM
+        default_source: UNVERIFIED
+      - name: pit_gear2_target_rpm
+        id: 0x1307
+        type: u16
+        unit: rpm
+        default: 4000
+        min: 0
+        max: 20000
+        owner: TUNER
+        safety_class: MEDIUM
+        default_source: UNVERIFIED
+      - name: pit_release_delay_ms
+        id: 0x1308
+        type: u16
+        unit: ms
+        default: 200
+        min: 0
+        max: 10000
+        owner: TUNER
+        safety_class: HIGH
+        default_source: UNVERIFIED
+        description: >-
+          Minimum time between the cut ending and it being allowed to end again. The
+          limiter owns its own cut, and this is the bound on that ownership.
+      - name: pit_activation_switch_inverted
+        id: 0x1309
+        type: bool
+        default: 0
+        owner: TUNER
+        safety_class: MEDIUM
+        default_source: UNVERIFIED
+        description: >-
+          True when the pit switch is active-low. The polarity is explicit because a
+          pit limiter wired to the wrong state is a limiter that engages in the pit.
+
+  - name: modes
+    base_id: 0x1400
+    items:
+      - name: modes_enabled
+        id: 0x1400
+        type: bits
+        default: 7
+        owner: MODE
+        safety_class: MEDIUM
+        default_source: UNVERIFIED
+        description: >-
+          Which drive modes exist in this configuration. A mode selects a calibration
+          *overlay*; it never selects a code path, and it can never change a hard
+          safety limit, because those live in the base image (CAL-001 sec.3).
+        bits:
+          - street
+          - sport
+          - track
+          - drag
+          - qualify
+          - race
+          - dyno
+          - custom1
+          - custom2
+          - custom3
+      - name: mode_default_load
+        id: 0x1401
+        type: enum
+        default: 0
+        owner: MODE
+        safety_class: MEDIUM
+        default_source: UNVERIFIED
+        description: >-
+          Mode loaded on power-up, before the user chooses. Street is the default
+          because it is the only mode that is safe to be in while the bike is being
+          wheeled out of a workshop.
+        values:
+          - {name: street, value: 0, description: Road legal, softest limits}
+          - {name: sport, value: 1, description: Road use with sharper response}
+          - {name: track, value: 2, description: Session use, protections still active}
+          - {name: drag, value: 3, description: Drag profile, no street legality claim}
+          - {name: qualify, value: 4, description: Single timed pass}
+          - {name: race, value: 5, description: Full race profile}
+          - {name: dyno, value: 6, description: Reproducible, nothing adapts under measurement}
+          - {name: custom1, value: 7, description: User overlay 1}
+          - {name: custom2, value: 8, description: User overlay 2}
+          - {name: custom3, value: 9, description: User overlay 3}
+      - name: mode_count
+        id: 0x1402
+        type: u8
+        default: 7
+        min: 1
+        max: 10
+        owner: READ_ONLY
+        safety_class: MEDIUM
+        default_source: UNVERIFIED
+        derived: true
+        description: >-
+          Number of modes this build declares. It is a build-time count, not a tuning
+          choice, and it is why it cannot be changed while the engine runs. live_edit false.
+        live_edit: false
+      - name: mode_switch_live
+        id: 0x1403
+        type: bool
+        default: 1
+        owner: MODE
+        safety_class: HIGH
+        default_source: UNVERIFIED
+        description: >-
+          Whether a mode change may be applied while the engine is running. A mode
+          switch is a small validated transaction that takes effect at a defined point
+          in the cycle, never part way through an injection or a spark event.
+      - name: mode_switch_coast_ms
+        id: 0x1404
+        type: u16
+        unit: ms
+        default: 250
+        min: 0
+        max: 10000
+        owner: TUNER
+        safety_class: MEDIUM
+        default_source: UNVERIFIED
+        description: >-
+          Minimum time between two mode changes. Modes select overlays, and a driver
+          toggling between them mid-corner would otherwise get an overlay per cycle -
+          a step change in fuelling and timing with no physical event behind it.

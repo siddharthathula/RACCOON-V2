@@ -1,0 +1,55 @@
+# Build trees. Everything here is reproducible from source with the commands in README.md,
+# and CMake output is full of absolute paths and timestamps, so committing it produces diffs
+# nobody can read.
+build/
+build-*/
+cmake-build-*/
+out/
+
+# Coverage and profiling output. The .gcov.json.gz files in the repository root are the
+# worst offenders: a fresh `make coverage` scatters one next to every translation unit.
+/*.gcov
+/*.gcov.json.gz
+*.gcda
+*.gcno
+coverage/
+lcov.info
+*.profraw
+*.profdata
+
+# Python bytecode and environments
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+.venv/
+venv/
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+
+# Compiled objects, anywhere
+*.o
+*.a
+*.so
+*.dylib
+*.dll
+*.elf
+*.bin
+*.hex
+*.map
+
+# Editor and OS noise
+.vscode/
+.idea/
+*.swp
+*~
+.DS_Store
+
+# Agent and CI scratch. __agent__/plan.json is working state for the build assistant, not a
+# source artefact, and it changes on every run.
+/__agent__/
+
+# Local logs. tests/python/simulator.log is written by the test suite on every run.
+/*.log
+logs/

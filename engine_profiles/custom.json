@@ -1,0 +1,228 @@
+{
+  "injection_strategy": "semi-sequential",
+  "ignition_strategy": "static_table",
+  "idle_strategy": "pwm_iac",
+  "lambda_strategy": "off",
+  "name": "custom",
+  "description": "A TEMPLATE, not an engine. Everything here is unverified and several values are deliberately impossible, so that a half-filled copy is REFUSED rather than half-built. Copy it, fill in every field, and work down the unverified list until it is empty.",
+  "use": "road",
+  "geometry": {
+    "cylinders": {
+      "value": 2,
+      "provenance": "unverified",
+      "note": "FILL THIS IN: 1 to 4"
+    },
+    "bore_mm": {
+      "value": 75.0,
+      "provenance": "unverified",
+      "note": "FILL THIS IN: measure it, do not estimate"
+    },
+    "stroke_mm": {
+      "value": 66.0,
+      "provenance": "unverified",
+      "note": "FILL THIS IN: measure it, do not estimate"
+    },
+    "compression_ratio": {
+      "value": 10.0,
+      "provenance": "unverified",
+      "note": "FILL THIS IN"
+    },
+    "rod_ratio": {
+      "value": 1.5,
+      "provenance": "unverified",
+      "note": "FILL THIS IN if the crank model matters"
+    },
+    "crank_layout": {
+      "value": 1,
+      "provenance": "unverified",
+      "note": "0 single, 1 parallel 180, 2 parallel 270, 3 inline four, 4 boxer, 5 custom"
+    },
+    "firing_order": [
+      0,
+      1
+    ]
+  },
+  "trigger": {
+    "crank_teeth": {
+      "value": 36,
+      "provenance": "unverified",
+      "note": "FILL THIS IN: COUNT THE WHEEL"
+    },
+    "missing_teeth": {
+      "value": 1,
+      "provenance": "unverified",
+      "note": "FILL THIS IN"
+    },
+    "missing_tooth_index": {
+      "value": 0,
+      "provenance": "unverified"
+    },
+    "tooth_1_angle_atdc": {
+      "value": 0.0,
+      "provenance": "unverified",
+      "note": "FILL THIS IN: timing light. Everything in the ignition table is timed against this."
+    },
+    "teeth_per_rev": {
+      "value": 1,
+      "provenance": "unverified"
+    },
+    "cam_teeth": {
+      "value": 0,
+      "provenance": "unverified",
+      "note": "0 for no cam; 3 or 4 for a half-speed wheel"
+    },
+    "tooth_1_polarity": {
+      "value": 3,
+      "provenance": "unverified",
+      "note": "FILL THIS IN: scope at the ECU pin"
+    },
+    "input_filter_level": {
+      "value": 1,
+      "provenance": "unverified"
+    },
+    "sync_skip_revolutions": {
+      "value": 0,
+      "provenance": "unverified"
+    }
+  },
+  "hardware": {
+    "injector_peak_a": {
+      "value": 4.0,
+      "provenance": "unverified",
+      "note": "FILL THIS IN: and then MEASURE THE FLOW at that current. The whole fuel model is built on cc per second."
+    },
+    "injector_hold_a": {
+      "value": 1.2,
+      "provenance": "unverified",
+      "note": "FILL THIS IN"
+    },
+    "injector_max_duty_pct": {
+      "value": 80.0,
+      "provenance": "unverified"
+    },
+    "injector_count": {
+      "value": 2,
+      "provenance": "unverified",
+      "note": "FILL THIS IN: one per cylinder"
+    },
+    "ignition_peak_a": {
+      "value": 7.5,
+      "provenance": "unverified",
+      "note": "FILL THIS IN from the coil datasheet"
+    },
+    "ignition_hold_a": {
+      "value": 3.5,
+      "provenance": "unverified",
+      "note": "FILL THIS IN"
+    },
+    "ignition_max_dwell_ms": {
+      "value": 8.0,
+      "provenance": "unverified",
+      "note": "FILL THIS IN from the coil datasheet"
+    },
+    "ignition_count": {
+      "value": 2,
+      "provenance": "unverified",
+      "note": "FILL THIS IN"
+    },
+    "spark_divider_ratio": {
+      "value": 9.0,
+      "provenance": "unverified",
+      "note": "FILL THIS IN"
+    },
+    "injector_driver_type": {
+      "value": "high_z_saturated",
+      "provenance": "unverified",
+      "note": "FILL THIS IN: high impedance saturates, low impedance needs peak and hold. Getting it wrong destroys the driver."
+    },
+    "ignition_driver_topology": {
+      "value": "smart_coil",
+      "provenance": "unverified",
+      "note": "FILL THIS IN from the coil datasheet"
+    },
+    "knock_sensor_count": {
+      "value": 0,
+      "provenance": "unverified"
+    },
+    "wheel_speed_channels": {
+      "value": 0,
+      "provenance": "unverified"
+    },
+    "pedal_channels": {
+      "value": 1,
+      "provenance": "unverified"
+    },
+    "throttle_channels": {
+      "value": 1,
+      "provenance": "unverified",
+      "note": "two ONLY if drive-by-wire is fitted"
+    },
+    "lambda_channels": {
+      "value": 0,
+      "provenance": "unverified",
+      "note": "0 means closed loop stays off"
+    },
+    "has_kill_switch": {
+      "value": true,
+      "provenance": "unverified",
+      "note": "FILL THIS IN and confirm the wiring fails safe"
+    },
+    "has_boost": {
+      "value": false,
+      "provenance": "unverified"
+    },
+    "has_vvt": {
+      "value": false,
+      "provenance": "unverified"
+    },
+    "has_traction": {
+      "value": false,
+      "provenance": "unverified"
+    },
+    "has_dbw": {
+      "value": false,
+      "provenance": "unverified"
+    }
+  },
+  "limits": {
+    "max_rpm": {
+      "value": 8000,
+      "provenance": "unverified",
+      "note": "FILL THIS IN"
+    },
+    "safety_rpm_limit": {
+      "value": 7500,
+      "provenance": "unverified",
+      "note": "FILL THIS IN: must be BELOW max_rpm"
+    },
+    "overspeed_rpm": {
+      "value": 8500,
+      "provenance": "unverified",
+      "note": "FILL THIS IN: must be ABOVE the safety limit"
+    },
+    "idle_rpm": {
+      "value": 1100,
+      "provenance": "unverified"
+    },
+    "ignition_min_deg": {
+      "value": -10.0,
+      "provenance": "unverified"
+    },
+    "ignition_max_deg": {
+      "value": 35.0,
+      "provenance": "unverified"
+    },
+    "lean_lambda_limit": {
+      "value": 1.25,
+      "provenance": "unverified"
+    },
+    "rich_lambda_limit": {
+      "value": 0.75,
+      "provenance": "unverified"
+    },
+    "boost_max_kpa": {
+      "value": 101.3,
+      "provenance": "unverified"
+    }
+  }
+}

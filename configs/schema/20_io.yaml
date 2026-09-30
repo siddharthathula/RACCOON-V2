@@ -1,0 +1,2207 @@
+# RACCOON V2 - sensor conditioning, plausibility and the hardware capability declaration.
+# Single source of truth for the firmware image and the tuner. See docs/CALIBRATION_SPEC.md.
+schema_version: 1
+
+groups:
+  - name: sensors
+    base_id: 0x0300
+    items:
+      # Each fitted analogue channel gets an eight-item block: transfer function,
+      # slope, offset, plausibility band, rate limit, freshness window and the
+      # declared fault behaviour. Slope and offset are applied to the *measured pin
+      # volts*, not to the ADC code; the code-to-volt step uses the monitored 5 V
+      # reference (ref5v), which is why a collapsed sensor rail cannot silently
+      # rescale every channel. See docs/SENSOR_SPEC.md.
+
+      # ---- throttle position sensor 1 ------------------------------------------
+      - name: tps1_slope
+        id: 0x0300
+        type: f32
+        unit: "%/V"
+        default: 20.0
+        min: 0.1
+        max: 200.0
+        owner: ENGINEER
+        safety_class: HIGH
+        default_source: UNVERIFIED
+        description: >-
+          Throttle opening per volt at the sensor pins. 20 %/V is a 0..5 V sensor; 25 %/V
+          is the 0.5..4.5 V form, which leaves a live diagnostic band at each stop.
+          Register UNK-GT-007 - the fitted sensor is not yet known.
+        live_edit: false
+      - name: tps1_offset
+        id: 0x0301
+        type: f32
+        unit: "%"
+        default: 0.0
+        min: -20.0
+        max: 20.0
+        owner: ENGINEER
+        safety_class: MEDIUM
+        default_source: UNVERIFIED
+        live_edit: false
+      - name: tps1_min
+        id: 0x0302
+        type: f32
+        unit: "%"
+        default: -2.0
+        min: -10.0
+        max: 10.0
+        owner: ENGINEER
+        safety_class: MEDIUM
+        default_source: UNVERIFIED
+        description: >-
+          Lower plausibility bound, deliberately a little below the closed stop so a real
+          idle position is not rejected as RANGE on every cycle.
+      - name: tps1_max
+        id: 0x0303
+        type: f32
+        unit: "%"
+        default: 102.0
+        min: 90.0
+        max: 110.0
+        owner: ENGINEER
+        safety_class: MEDIUM
+        default_source: UNVERIFIED
+        description: Upper plausibility bound, the throttle stop plus margin.
+      - name: tps1_rate_limit
+        id: 0x0304
+        type: f32
+        unit: "%/s"
+        default: 200.0
+        min: 10.0
+        max: 5000.0
+        owner: ENGINEER
+        safety_class: MEDIUM
+        default_source: SOURCE-DERIVED
+        source_ref: "SENS-001 sec.7 (TPS 200 %/s)"
+        description: >-
+          Open-loop rate limiter, not a smoothing filter: RATE_LIMIT is a reported flag so
+          a genuine fast transient stays distinguishable from a limited one (test S13).
+      - name: tps1_freshness_ms
+        id: 0x0305
+        type: u16
+        unit: ms
+        default: 20
+        min: 1
+        max: 1000
+        owner: ENGINEER
+        safety_class: MEDIUM
+        default_source: SOURCE-DERIVED
+        source_ref: "SENS-001 sec.7 (TPS 20 ms)"
+      - name: tps1_transfer
+        id: 0x0306
+        type: enum
+        default: 1
+        owner: ENGINEER
+        safety_class: HIGH
+        default_source: UNVERIFIED
+        description: >-
+          Transfer-function family for this channel (SENS-001 sec.3). ratiometric divides
+          the code by the ADC full scale and scales by the *measured* 5 V reference, so a
+          drifting sensor rail cannot quietly rescale the throttle.
+        values:
+          - {name: linear, value: 0, description: value = slope * volts + offset}
+          - {name: ratiometric, value: 1, description: Through the monitored 5 V reference}
+          - {name: ntc_table, value: 2, description: Thermistor, coefficients in the profile}
+          - {name: polynomial, value: 3, description: Bounded second or third order}
+          - {name: switch_hysteresis, value: 4, description: Digital level with hysteresis}
+          - {name: none, value: 5, description: Channel not fitted on this build}
+      - name: tps1_fault_behaviour
+        id: 0x0307
+        type: enum
+        default: 0
+        owner: ENGINEER
+        safety_class: HIGH
+        default_source: UNVERIFIED
+        description: >-
+          What the control loop does when this channel is invalid. The choice is a
+          deliberate calibration per the fail-operational / fail-safe split in SC-001
+          sec.4, never an accidental default.
+        values:
+          - {name: substitute_fallback, value: 0, description: Limp - declared value, DTC, service request}
+          - {name: hold_last_valid_timed, value: 1, description: Hold, then fail at the freshness limit}
+          - {name: mark_invalid_use_alternate_strategy, value: 2, description: Switch load strategy}
+          - {name: enter_limp_mode, value: 3, description: Declared reduced-authority state}
+          - {name: request_torque_cut, value: 4, description: Ask the torque manager to de-authority}
+          - {name: shutdown_request, value: 5, description: Latched cut; only re-enabled manually}
+          - {name: invalidate_dependents, value: 6, description: This channel faults many others at once}
+
+      # ---- manifold absolute pressure -------------------------------------------
+      - name: map_slope
+        id: 0x0308
+        type: f32
+        unit: "kPa/V"
+        default: 200.0
+        min: 1.0
+        max: 1000.0
+        owner: ENGINEER
+        safety_class: HIGH
+        default_source: UNVERIFIED
+        description: >-
+          Pressure per volt. 200 kPa/V spans 0..1000 kPa absolute over 0..5 V, which
+          covers both a 2-bar and a 3-bar gauge. Register UNK-GT-008 - the fitted sensor
+          is unknown, and a 4-bar part needs a different slope.
+        live_edit: false
+      - name: map_offset
+        id: 0x0309
+        type: f32
+        unit: kPa
+        default: 0.0
+        min: -100.0
+        max: 100.0
+        owner: ENGINEER
+        safety_class: MEDIUM
+        default_source: UNVERIFIED
+        live_edit: false
+      - name: map_min
+        id: 0x030A
+        type: f32
+        unit: kPa
+        default: 0.0
+        min: -50.0
+        max: 100.0
+        owner: ENGINEER
+        safety_class: MEDIUM
+        default_source: UNVERIFIED
+        description: >-
+          Lower plausibility bound in absolute terms. A negative band is admitted so a
+          gauge briefly below its zero on a cold start is not a fault.
+      - name: map_max
+        id: 0x030B
+        type: f32
+        unit: kPa
+        default: 300.0
+        min: 50.0
+        max: 500.0
+        owner: ENGINEER
+        safety_class: MEDIUM
+        default_source: UNVERIFIED
+        description: Upper plausibility bound. Must not be set below the boost target.
+      - name: map_rate_limit
+        id: 0x030C
+        type: f32
+        unit: "kPa/s"
+        default: 500.0
+        min: 5.0
+        max: 5000.0
+        owner: ENGINEER
+        safety_class: MEDIUM
+        default_source: SOURCE-DERIVED
+        source_ref: "SENS-001 sec.7 (MAP 500 kPa/s)"
+        description: >-
+          Shared with the transient model. A value clipped here is otherwise
+          indistinguishable from a real pressure event, so the limiter is always flagged.
+      - name: map_freshness_ms
+        id: 0x030D
+        type: u16
+        unit: ms
+        default: 20
+        min: 1
+        max: 1000
+        owner: ENGINEER
+        safety_class: MEDIUM
+        default_source: SOURCE-DERIVED
+        source_ref: "SENS-001 sec.7 (MAP 20 ms)"
+      - name: map_transfer
+        id: 0x030E
+        type: enum
+        default: 1
+        owner: ENGINEER
+        safety_class: HIGH
+        default_source: UNVERIFIED
+        values:
+          - {name: linear, value: 0}
+          - {name: ratiometric, value: 1}
+          - {name: ntc_table, value: 2}
+          - {name: polynomial, value: 3}
+          - {name: switch_hysteresis, value: 4}
+          - {name: none, value: 5}
+      - name: map_fault_behaviour
+        id: 0x030F
+        type: enum
+        default: 0
+        owner: ENGINEER
+        safety_class: HIGH
+        default_source: UNVERIFIED
+        description: >-
+          Speed density has a declared degraded path, so the default is the limp: with
+          MAP invalid the load estimator falls to the alternate strategy and records the
+          substitution in the correction vector (FUEL-001 sec.2).
+
+      # ---- mass air flow --------------------------------------------------------
+        values:
+          - {name: substitute_fallback, value: 0}
+          - {name: hold_last_valid_timed, value: 1}
+          - {name: mark_invalid_use_alternate_strategy, value: 2}
+          - {name: enter_limp_mode, value: 3}
+          - {name: request_torque_cut, value: 4}
+          - {name: shutdown_request, value: 5}
+          - {name: invalidate_dependents, value: 6}
+      - name: maf_slope
+        id: 0x0310
+        type: f32
+        unit: "g/s/V"
+        default: 10.0
+        min: 0.1
+        max: 500.0
+        owner: ENGINEER
+        safety_class: HIGH
+        default_source: UNVERIFIED
+        description: >-
+          Air mass flow per volt at the pins. Only relevant when the MAF fuel strategy is
+          selected; a motorcycle normally has no MAF, and an absent sensor is declared by
+          transfer = none rather than by leaving a plausible number behind.
+        live_edit: false
+      - name: maf_offset
+        id: 0x0311
+        type: f32
+        unit: "g/s"
+        default: 0.0
+        min: -20.0
+        max: 20.0
+        owner: ENGINEER
+        safety_class: MEDIUM
+        default_source: UNVERIFIED
+        live_edit: false
+      - name: maf_min
+        id: 0x0312
+        type: f32
+        unit: "g/s"
+        default: 0.0
+        min: -5.0
+        max: 10.0
+        owner: ENGINEER
+        safety_class: MEDIUM
+        default_source: UNVERIFIED
+      - name: maf_max
+        id: 0x0313
+        type: f32
+        unit: "g/s"
+        default: 200.0
+        min: 10.0
+        max: 1000.0
+        owner: ENGINEER
+        safety_class: MEDIUM
+        default_source: UNVERIFIED
+        description: Upper plausibility bound; must exceed idle flow with a margin.
+      - name: maf_rate_limit
+        id: 0x0314
+        type: f32
+        unit: "g/s/s"
+        default: 500.0
+        min: 5.0
+        max: 10000.0
+        owner: ENGINEER
+        safety_class: MEDIUM
+        default_source: UNVERIFIED
+      - name: maf_freshness_ms
+        id: 0x0315
+        type: u16
+        unit: ms
+        default: 20
+        min: 1
+        max: 1000
+        owner: ENGINEER
+        safety_class: MEDIUM
+        default_source: UNVERIFIED
+      - name: maf_transfer
+        id: 0x0316
+        type: enum
+        default: 1
+        owner: ENGINEER
+        safety_class: HIGH
+        default_source: UNVERIFIED
+        values:
+          - {name: linear, value: 0}
+          - {name: ratiometric, value: 1}
+          - {name: ntc_table, value: 2}
+          - {name: polynomial, value: 3}
+          - {name: switch_hysteresis, value: 4}
+          - {name: none, value: 5}
+      - name: maf_fault_behaviour
+        id: 0x0317
+        type: enum
+        default: 2
+        owner: ENGINEER
+        safety_class: HIGH
+        default_source: UNVERIFIED
+        description: >-
+          MAF is the only absolute air measurement, so losing it changes the *nature* of
+          the calculation; the declared behaviour is to switch load strategy, not to
+          continue with a held value.
+
+      # ---- engine coolant temperature -------------------------------------------
+        values:
+          - {name: substitute_fallback, value: 0}
+          - {name: hold_last_valid_timed, value: 1}
+          - {name: mark_invalid_use_alternate_strategy, value: 2}
+          - {name: enter_limp_mode, value: 3}
+          - {name: request_torque_cut, value: 4}
+          - {name: shutdown_request, value: 5}
+          - {name: invalidate_dependents, value: 6}
+      - name: ect_slope
+        id: 0x0318
+        type: f32
+        unit: "degC/V"
+        default: -50.0
+        min: -500.0
+        max: 500.0
+        owner: ENGINEER
+        safety_class: HIGH
+        default_source: UNVERIFIED
+        description: >-
+          Linearised front-end gain of the coolant thermistor. Negative, because an NTC
+          on a pull-up reads lower as it heats. With transfer = ntc_table the
+          Steinhart-Hart coefficients from the sensor profile take precedence and this
+          pair is the linearisation seed. Register UNK-GT-009.
+        live_edit: false
+      - name: ect_offset
+        id: 0x0319
+        type: f32
+        unit: "degC"
+        default: 25.0
+        min: -100.0
+        max: 200.0
+        owner: ENGINEER
+        safety_class: MEDIUM
+        default_source: UNVERIFIED
+        live_edit: false
+      - name: ect_min
+        id: 0x031A
+        type: f32
+        unit: "degC"
+        default: -40.0
+        min: -100.0
+        max: 0.0
+        owner: ENGINEER
+        safety_class: MEDIUM
+        default_source: UNVERIFIED
+        description: >-
+          Lower plausibility bound. It must not be set so high that a genuinely cold
+          engine is reported RANGE and loses cold-start enrichment.
+      - name: ect_max
+        id: 0x031B
+        type: f32
+        unit: "degC"
+        default: 150.0
+        min: 60.0
+        max: 250.0
+        owner: ENGINEER
+        safety_class: MEDIUM
+        default_source: UNVERIFIED
+      - name: ect_rate_limit
+        id: 0x031C
+        type: f32
+        unit: "degC/s"
+        default: 20.0
+        min: 0.5
+        max: 200.0
+        owner: ENGINEER
+        safety_class: MEDIUM
+        default_source: SOURCE-DERIVED
+        source_ref: "SENS-001 sec.7 (ECT 20 degC/s)"
+      - name: ect_freshness_ms
+        id: 0x031D
+        type: u16
+        unit: ms
+        default: 2000
+        min: 1
+        max: 20000
+        owner: ENGINEER
+        safety_class: MEDIUM
+        default_source: SOURCE-DERIVED
+        source_ref: "SENS-001 sec.7 (ECT 2 s)"
+      - name: ect_transfer
+        id: 0x031E
+        type: enum
+        default: 2
+        owner: ENGINEER
+        safety_class: HIGH
+        default_source: UNVERIFIED
+        values:
+          - {name: linear, value: 0}
+          - {name: ratiometric, value: 1}
+          - {name: ntc_table, value: 2}
+          - {name: polynomial, value: 3}
+          - {name: switch_hysteresis, value: 4}
+          - {name: none, value: 5}
+      - name: ect_fault_behaviour
+        id: 0x031F
+        type: enum
+        default: 0
+        owner: ENGINEER
+        safety_class: HIGH
+        default_source: UNVERIFIED
+        description: >-
+          A coolant sensor failure does not stop a running engine; it substitutes a
+          conservative warm value and requests service. Running on a fixed enrichment
+          value after losing coolant is how an engine is destroyed, so the fallback is
+          warm, never cold.
+
+      # ---- intake air temperature -----------------------------------------------
+        values:
+          - {name: substitute_fallback, value: 0}
+          - {name: hold_last_valid_timed, value: 1}
+          - {name: mark_invalid_use_alternate_strategy, value: 2}
+          - {name: enter_limp_mode, value: 3}
+          - {name: request_torque_cut, value: 4}
+          - {name: shutdown_request, value: 5}
+          - {name: invalidate_dependents, value: 6}
+      - name: iat_slope
+        id: 0x0320
+        type: f32
+        unit: "degC/V"
+        default: -50.0
+        min: -500.0
+        max: 500.0
+        owner: ENGINEER
+        safety_class: HIGH
+        default_source: UNVERIFIED
+        description: >-
+          Linearised front-end gain of the intake thermistor. Register UNK-GT-009 covers
+          the curve. IAT drives charge-temperature ignition correction and the ethanol
+          charge-cooling term, so a wrong slope is a persistent timing error rather than
+          a small display error.
+        live_edit: false
+      - name: iat_offset
+        id: 0x0321
+        type: f32
+        unit: "degC"
+        default: 25.0
+        min: -100.0
+        max: 200.0
+        owner: ENGINEER
+        safety_class: MEDIUM
+        default_source: UNVERIFIED
+        live_edit: false
+      - name: iat_min
+        id: 0x0322
+        type: f32
+        unit: "degC"
+        default: -40.0
+        min: -100.0
+        max: 0.0
+        owner: ENGINEER
+        safety_class: MEDIUM
+        default_source: UNVERIFIED
+      - name: iat_max
+        id: 0x0323
+        type: f32
+        unit: "degC"
+        default: 150.0
+        min: 60.0
+        max: 250.0
+        owner: ENGINEER
+        safety_class: MEDIUM
+        default_source: UNVERIFIED
+      - name: iat_rate_limit
+        id: 0x0324
+        type: f32
+        unit: "degC/s"
+        default: 20.0
+        min: 0.5
+        max: 200.0
+        owner: ENGINEER
+        safety_class: MEDIUM
+        default_source: SOURCE-DERIVED
+        source_ref: "SENS-001 sec.7 (IAT 20 degC/s)"
+      - name: iat_freshness_ms
+        id: 0x0325
+        type: u16
+        unit: ms
+        default: 2000
+        min: 1
+        max: 20000
+        owner: ENGINEER
+        safety_class: MEDIUM
+        default_source: SOURCE-DERIVED
+        source_ref: "SENS-001 sec.7 (IAT 2 s)"
+      - name: iat_transfer
+        id: 0x0326
+        type: enum
+        default: 2
+        owner: ENGINEER
+        safety_class: HIGH
+        default_source: UNVERIFIED
+        values:
+          - {name: linear, value: 0}
+          - {name: ratiometric, value: 1}
+          - {name: ntc_table, value: 2}
+          - {name: polynomial, value: 3}
+          - {name: switch_hysteresis, value: 4}
+          - {name: none, value: 5}
+      - name: iat_fault_behaviour
+        id: 0x0327
+        type: enum
+        default: 0
+        owner: ENGINEER
+        safety_class: HIGH
+        default_source: UNVERIFIED
+
+      # ---- oil pressure ---------------------------------------------------------
+        values:
+          - {name: substitute_fallback, value: 0}
+          - {name: hold_last_valid_timed, value: 1}
+          - {name: mark_invalid_use_alternate_strategy, value: 2}
+          - {name: enter_limp_mode, value: 3}
+          - {name: request_torque_cut, value: 4}
+          - {name: shutdown_request, value: 5}
+          - {name: invalidate_dependents, value: 6}
+      - name: oil_pressure_slope
+        id: 0x0328
+        type: f32
+        unit: "bar/V"
+        default: 2.0
+        min: 0.01
+        max: 20.0
+        owner: ENGINEER
+        safety_class: HIGH
+        default_source: UNVERIFIED
+        description: >-
+          Oil pressure per volt; 2 bar/V is the common 0..5 V / 0..10 bar sender. A switch
+          instead of a sender is the other possibility, and it is declared by choosing
+          transfer = switch_hysteresis rather than by guessing a slope. Register
+          UNK-GT-018.
+        live_edit: false
+      - name: oil_pressure_offset
+        id: 0x0329
+        type: f32
+        unit: bar
+        default: 0.0
+        min: -5.0
+        max: 5.0
+        owner: ENGINEER
+        safety_class: MEDIUM
+        default_source: UNVERIFIED
+        live_edit: false
+      - name: oil_pressure_min
+        id: 0x032A
+        type: f32
+        unit: bar
+        default: 0.0
+        min: -5.0
+        max: 5.0
+        owner: ENGINEER
+        safety_class: MEDIUM
+        default_source: UNVERIFIED
+        description: Lower plausibility bound; a small negative band absorbs sender zero error.
+      - name: oil_pressure_max
+        id: 0x032B
+        type: f32
+        unit: bar
+        default: 10.0
+        min: 1.0
+        max: 100.0
+        owner: ENGINEER
+        safety_class: MEDIUM
+        default_source: UNVERIFIED
+      - name: oil_pressure_rate_limit
+        id: 0x032C
+        type: f32
+        unit: "bar/s"
+        default: 10.0
+        min: 0.5
+        max: 200.0
+        owner: ENGINEER
+        safety_class: MEDIUM
+        default_source: SOURCE-DERIVED
+        source_ref: "SENS-001 sec.7 (oil pressure 10 bar/s)"
+      - name: oil_pressure_freshness_ms
+        id: 0x032D
+        type: u16
+        unit: ms
+        default: 100
+        min: 1
+        max: 2000
+        owner: ENGINEER
+        safety_class: MEDIUM
+        default_source: SOURCE-DERIVED
+        source_ref: "SENS-001 sec.7 (oil pressure 100 ms)"
+      - name: oil_pressure_transfer
+        id: 0x032E
+        type: enum
+        default: 0
+        owner: ENGINEER
+        safety_class: HIGH
+        default_source: UNVERIFIED
+        values:
+          - {name: linear, value: 0}
+          - {name: ratiometric, value: 1}
+          - {name: ntc_table, value: 2}
+          - {name: polynomial, value: 3}
+          - {name: switch_hysteresis, value: 4}
+          - {name: none, value: 5}
+      - name: oil_pressure_fault_behaviour
+        id: 0x032F
+        type: enum
+        default: 0
+        owner: ENGINEER
+        safety_class: HIGH
+        default_source: UNVERIFIED
+        description: >-
+          Oil starvation is a latching, escalating hazard (SC-001 H-08). The declared
+          action here only decides between substituting a value and entering the limp;
+          the action taken is the safety group's latching cut with recovery hysteresis.
+
+      # ---- oil temperature ------------------------------------------------------
+        values:
+          - {name: substitute_fallback, value: 0}
+          - {name: hold_last_valid_timed, value: 1}
+          - {name: mark_invalid_use_alternate_strategy, value: 2}
+          - {name: enter_limp_mode, value: 3}
+          - {name: request_torque_cut, value: 4}
+          - {name: shutdown_request, value: 5}
+          - {name: invalidate_dependents, value: 6}
+      - name: oil_temp_slope
+        id: 0x0330
+        type: f32
+        unit: "degC/V"
+        default: -50.0
+        min: -500.0
+        max: 500.0
+        owner: ENGINEER
+        safety_class: HIGH
+        default_source: UNVERIFIED
+        live_edit: false
+      - name: oil_temp_offset
+        id: 0x0331
+        type: f32
+        unit: "degC"
+        default: 25.0
+        min: -100.0
+        max: 200.0
+        owner: ENGINEER
+        safety_class: MEDIUM
+        default_source: UNVERIFIED
+        live_edit: false
+      - name: oil_temp_min
+        id: 0x0332
+        type: f32
+        unit: "degC"
+        default: -40.0
+        min: -100.0
+        max: 0.0
+        owner: ENGINEER
+        safety_class: MEDIUM
+        default_source: UNVERIFIED
+      - name: oil_temp_max
+        id: 0x0333
+        type: f32
+        unit: "degC"
+        default: 150.0
+        min: 60.0
+        max: 250.0
+        owner: ENGINEER
+        safety_class: MEDIUM
+        default_source: UNVERIFIED
+        description: Upper plausibility bound; oil above this is a failure, not a reading.
+      - name: oil_temp_rate_limit
+        id: 0x0334
+        type: f32
+        unit: "degC/s"
+        default: 20.0
+        min: 0.5
+        max: 200.0
+        owner: ENGINEER
+        safety_class: MEDIUM
+        default_source: SOURCE-DERIVED
+        source_ref: "SENS-001 sec.7 (oil temperature 20 degC/s)"
+      - name: oil_temp_freshness_ms
+        id: 0x0335
+        type: u16
+        unit: ms
+        default: 2000
+        min: 1
+        max: 20000
+        owner: ENGINEER
+        safety_class: MEDIUM
+        default_source: SOURCE-DERIVED
+        source_ref: "SENS-001 sec.7 (oil temperature 2 s)"
+      - name: oil_temp_transfer
+        id: 0x0336
+        type: enum
+        default: 2
+        owner: ENGINEER
+        safety_class: HIGH
+        default_source: UNVERIFIED
+        values:
+          - {name: linear, value: 0}
+          - {name: ratiometric, value: 1}
+          - {name: ntc_table, value: 2}
+          - {name: polynomial, value: 3}
+          - {name: switch_hysteresis, value: 4}
+          - {name: none, value: 5}
+      - name: oil_temp_fault_behaviour
+        id: 0x0337
+        type: enum
+        default: 0
+        owner: ENGINEER
+        safety_class: HIGH
+        default_source: UNVERIFIED
+
+      # ---- fuel pressure -------------------------------------------------------
+        values:
+          - {name: substitute_fallback, value: 0}
+          - {name: hold_last_valid_timed, value: 1}
+          - {name: mark_invalid_use_alternate_strategy, value: 2}
+          - {name: enter_limp_mode, value: 3}
+          - {name: request_torque_cut, value: 4}
+          - {name: shutdown_request, value: 5}
+          - {name: invalidate_dependents, value: 6}
+      - name: fuel_pressure_slope
+        id: 0x0338
+        type: f32
+        unit: "bar/V"
+        default: 2.0
+        min: 0.01
+        max: 20.0
+        owner: ENGINEER
+        safety_class: HIGH
+        default_source: UNVERIFIED
+        description: >-
+          Rail pressure per volt at the sensor. Distinct from the pressure-compensation
+          slope in the fuel group: this one turns volts into bars, that one corrects the
+          delivered mass. Register UNK-GT-005.
+        live_edit: false
+      - name: fuel_pressure_offset
+        id: 0x0339
+        type: f32
+        unit: bar
+        default: 0.0
+        min: -5.0
+        max: 5.0
+        owner: ENGINEER
+        safety_class: MEDIUM
+        default_source: UNVERIFIED
+        live_edit: false
+      - name: fuel_pressure_min
+        id: 0x033A
+        type: f32
+        unit: bar
+        default: 0.0
+        min: -5.0
+        max: 5.0
+        owner: ENGINEER
+        safety_class: MEDIUM
+        default_source: UNVERIFIED
+      - name: fuel_pressure_max
+        id: 0x033B
+        type: f32
+        unit: bar
+        default: 10.0
+        min: 1.0
+        max: 100.0
+        owner: ENGINEER
+        safety_class: MEDIUM
+        default_source: UNVERIFIED
+      - name: fuel_pressure_rate_limit
+        id: 0x033C
+        type: f32
+        unit: "bar/s"
+        default: 10.0
+        min: 0.5
+        max: 200.0
+        owner: ENGINEER
+        safety_class: MEDIUM
+        default_source: SOURCE-DERIVED
+        source_ref: "SENS-001 sec.7 (fuel pressure 10 bar/s)"
+      - name: fuel_pressure_freshness_ms
+        id: 0x033D
+        type: u16
+        unit: ms
+        default: 100
+        min: 1
+        max: 2000
+        owner: ENGINEER
+        safety_class: MEDIUM
+        default_source: SOURCE-DERIVED
+        source_ref: "SENS-001 sec.7 (fuel pressure 100 ms)"
+      - name: fuel_pressure_transfer
+        id: 0x033E
+        type: enum
+        default: 0
+        owner: ENGINEER
+        safety_class: HIGH
+        default_source: UNVERIFIED
+        values:
+          - {name: linear, value: 0}
+          - {name: ratiometric, value: 1}
+          - {name: ntc_table, value: 2}
+          - {name: polynomial, value: 3}
+          - {name: switch_hysteresis, value: 4}
+          - {name: none, value: 5}
+      - name: fuel_pressure_fault_behaviour
+        id: 0x033F
+        type: enum
+        default: 0
+        owner: ENGINEER
+        safety_class: HIGH
+        default_source: UNVERIFIED
+        description: >-
+          A lost pressure sensor must not mean a rich engine. The declared fallback is
+          the conservative nominal pressure, and the low-pressure protection in the
+          safety group is what actually restricts fuel.
+
+      # ---- exhaust gas temperature ---------------------------------------------
+        values:
+          - {name: substitute_fallback, value: 0}
+          - {name: hold_last_valid_timed, value: 1}
+          - {name: mark_invalid_use_alternate_strategy, value: 2}
+          - {name: enter_limp_mode, value: 3}
+          - {name: request_torque_cut, value: 4}
+          - {name: shutdown_request, value: 5}
+          - {name: invalidate_dependents, value: 6}
+      - name: egt_slope
+        id: 0x0340
+        type: f32
+        unit: "degC/V"
+        default: 167.0
+        min: 1.0
+        max: 2000.0
+        owner: ENGINEER
+        safety_class: MEDIUM
+        default_source: UNVERIFIED
+        description: >-
+          Degrees per volt at the amplifier output. A Type-K front end is about 41.9 uV
+          per degree, so the amplifier gain sets this; 167 degC/V spans 0..835 C over
+          0..5 V. Probe placement matters far more than the gain and is not yet known.
+        live_edit: false
+      - name: egt_offset
+        id: 0x0341
+        type: f32
+        unit: "degC"
+        default: 0.0
+        min: -100.0
+        max: 500.0
+        owner: ENGINEER
+        safety_class: MEDIUM
+        default_source: UNVERIFIED
+        live_edit: false
+      - name: egt_min
+        id: 0x0342
+        type: f32
+        unit: "degC"
+        default: 0.0
+        min: -100.0
+        max: 200.0
+        owner: ENGINEER
+        safety_class: MEDIUM
+        default_source: UNVERIFIED
+      - name: egt_max
+        id: 0x0343
+        type: f32
+        unit: "degC"
+        default: 1000.0
+        min: 100.0
+        max: 2000.0
+        owner: ENGINEER
+        safety_class: MEDIUM
+        default_source: UNVERIFIED
+        description: >-
+          Upper plausibility bound. EGT is a diagnostic input, not a control input, so
+          this band may be generous; the protective limit is safety.egt_max_c.
+      - name: egt_rate_limit
+        id: 0x0344
+        type: f32
+        unit: "degC/s"
+        default: 200.0
+        min: 5.0
+        max: 2000.0
+        owner: ENGINEER
+        safety_class: MEDIUM
+        default_source: UNVERIFIED
+      - name: egt_freshness_ms
+        id: 0x0345
+        type: u16
+        unit: ms
+        default: 500
+        min: 1
+        max: 10000
+        owner: ENGINEER
+        safety_class: MEDIUM
+        default_source: UNVERIFIED
+      - name: egt_transfer
+        id: 0x0346
+        type: enum
+        default: 0
+        owner: ENGINEER
+        safety_class: MEDIUM
+        default_source: UNVERIFIED
+        values:
+          - {name: linear, value: 0}
+          - {name: ratiometric, value: 1}
+          - {name: ntc_table, value: 2}
+          - {name: polynomial, value: 3}
+          - {name: switch_hysteresis, value: 4}
+          - {name: none, value: 5}
+      - name: egt_fault_behaviour
+        id: 0x0347
+        type: enum
+        default: 0
+        owner: ENGINEER
+        safety_class: MEDIUM
+        default_source: UNVERIFIED
+
+      # ---- fuel content ---------------------------------------------------------
+        values:
+          - {name: substitute_fallback, value: 0}
+          - {name: hold_last_valid_timed, value: 1}
+          - {name: mark_invalid_use_alternate_strategy, value: 2}
+          - {name: enter_limp_mode, value: 3}
+          - {name: request_torque_cut, value: 4}
+          - {name: shutdown_request, value: 5}
+          - {name: invalidate_dependents, value: 6}
+      - name: ethanol_slope
+        id: 0x0348
+        type: f32
+        unit: "frac/V"
+        default: 0.2
+        min: 0.01
+        max: 1.0
+        owner: ENGINEER
+        safety_class: MEDIUM
+        default_source: UNVERIFIED
+        description: >-
+          Ethanol fraction per volt; 0.2/V is a 0..5 V linear sensor, and most real flex
+          sensors are 50..500 Hz, selected by transfer. Most motorcycles have no flex
+          sensor at all, which is transfer = none with engine.fuel_ethanol_fraction set
+          by hand instead.
+        live_edit: false
+      - name: ethanol_offset
+        id: 0x0349
+        type: f32
+        unit: frac
+        default: 0.0
+        min: -0.5
+        max: 0.5
+        owner: ENGINEER
+        safety_class: MEDIUM
+        default_source: UNVERIFIED
+        live_edit: false
+      - name: ethanol_min
+        id: 0x034A
+        type: f32
+        unit: frac
+        default: 0.0
+        min: -0.2
+        max: 0.5
+        owner: ENGINEER
+        safety_class: MEDIUM
+        default_source: UNVERIFIED
+      - name: ethanol_max
+        id: 0x034B
+        type: f32
+        unit: frac
+        default: 1.0
+        min: 0.5
+        max: 1.2
+        owner: ENGINEER
+        safety_class: MEDIUM
+        default_source: UNVERIFIED
+      - name: ethanol_rate_limit
+        id: 0x034C
+        type: f32
+        unit: "frac/s"
+        default: 0.1
+        min: 0.001
+        max: 2.0
+        owner: ENGINEER
+        safety_class: MEDIUM
+        default_source: UNVERIFIED
+        description: >-
+          Deliberately slow. Fuel does not change blend, so a fast transition is a
+          sensor fault and must be rejected outright rather than blended through, which
+          would smear a real disagreement into an undetectable wrong value.
+      - name: ethanol_freshness_ms
+        id: 0x034D
+        type: u16
+        unit: ms
+        default: 1000
+        min: 1
+        max: 20000
+        owner: ENGINEER
+        safety_class: MEDIUM
+        default_source: UNVERIFIED
+      - name: ethanol_transfer
+        id: 0x034E
+        type: enum
+        default: 1
+        owner: ENGINEER
+        safety_class: MEDIUM
+        default_source: UNVERIFIED
+        values:
+          - {name: linear, value: 0}
+          - {name: ratiometric, value: 1}
+          - {name: ntc_table, value: 2}
+          - {name: polynomial, value: 3}
+          - {name: switch_hysteresis, value: 4}
+          - {name: none, value: 5}
+      - name: ethanol_fault_behaviour
+        id: 0x034F
+        type: enum
+        default: 1
+        owner: ENGINEER
+        safety_class: MEDIUM
+        default_source: UNVERIFIED
+        description: >-
+          Hold the last plausible blend for a bounded time instead of reverting at
+          once: refuelling with a different blend genuinely happens mid-ride, and an
+          instant step back to pure gasoline would itself be a large fuelling error.
+
+      # ---- battery --------------------------------------------------------------
+        values:
+          - {name: substitute_fallback, value: 0}
+          - {name: hold_last_valid_timed, value: 1}
+          - {name: mark_invalid_use_alternate_strategy, value: 2}
+          - {name: enter_limp_mode, value: 3}
+          - {name: request_torque_cut, value: 4}
+          - {name: shutdown_request, value: 5}
+          - {name: invalidate_dependents, value: 6}
+      - name: battery_slope
+        id: 0x0350
+        type: f32
+        unit: "V/V"
+        default: 3.0
+        min: 1.0
+        max: 20.0
+        owner: ENGINEER
+        safety_class: HIGH
+        default_source: UNVERIFIED
+        description: >-
+          Divider ratio of the battery-sense input: 3.0 means a 12 V pack presents 3.0 V
+          to the ADC. Battery voltage feeds injector dead time, coil dwell capability and
+          both under- and over-voltage protections, so a wrong ratio is a whole-vehicle
+          fuelling and timing error rather than a gauge error.
+        live_edit: false
+      - name: battery_offset
+        id: 0x0351
+        type: f32
+        unit: V
+        default: 0.0
+        min: -2.0
+        max: 2.0
+        owner: ENGINEER
+        safety_class: MEDIUM
+        default_source: UNVERIFIED
+        live_edit: false
+      - name: battery_min
+        id: 0x0352
+        type: f32
+        unit: V
+        default: 0.0
+        min: -5.0
+        max: 10.0
+        owner: ENGINEER
+        safety_class: MEDIUM
+        default_source: UNVERIFIED
+      - name: battery_max
+        id: 0x0353
+        type: f32
+        unit: V
+        default: 18.0
+        min: 12.0
+        max: 40.0
+        owner: ENGINEER
+        safety_class: MEDIUM
+        default_source: UNVERIFIED
+        description: Upper plausibility bound; above this the reading is a wiring fault.
+      - name: battery_rate_limit
+        id: 0x0354
+        type: f32
+        unit: "V/s"
+        default: 20.0
+        min: 1.0
+        max: 200.0
+        owner: ENGINEER
+        safety_class: MEDIUM
+        default_source: SOURCE-DERIVED
+        source_ref: "SENS-001 sec.7 (battery 20 V/s)"
+      - name: battery_freshness_ms
+        id: 0x0355
+        type: u16
+        unit: ms
+        default: 1000
+        min: 1
+        max: 20000
+        owner: ENGINEER
+        safety_class: MEDIUM
+        default_source: SOURCE-DERIVED
+        source_ref: "SENS-001 sec.7 (battery 1 s)"
+      - name: battery_transfer
+        id: 0x0356
+        type: enum
+        default: 0
+        owner: ENGINEER
+        safety_class: HIGH
+        default_source: UNVERIFIED
+        values:
+          - {name: linear, value: 0}
+          - {name: ratiometric, value: 1}
+          - {name: ntc_table, value: 2}
+          - {name: polynomial, value: 3}
+          - {name: switch_hysteresis, value: 4}
+          - {name: none, value: 5}
+      - name: battery_fault_behaviour
+        id: 0x0357
+        type: enum
+        default: 3
+        owner: ENGINEER
+        safety_class: HIGH
+        default_source: UNVERIFIED
+        description: >-
+          The default is the limp. With no battery measurement the ECU cannot know
+          whether the coils are reaching primary current, so it widens no pulse and
+          reduces authority instead of guessing.
+
+      # ---- 5 V sensor reference monitor ----------------------------------------
+        values:
+          - {name: substitute_fallback, value: 0}
+          - {name: hold_last_valid_timed, value: 1}
+          - {name: mark_invalid_use_alternate_strategy, value: 2}
+          - {name: enter_limp_mode, value: 3}
+          - {name: request_torque_cut, value: 4}
+          - {name: shutdown_request, value: 5}
+          - {name: invalidate_dependents, value: 6}
+      - name: ref5v_slope
+        id: 0x0358
+        type: f32
+        unit: "V/V"
+        default: 1.0
+        min: 0.5
+        max: 2.0
+        owner: ENGINEER
+        safety_class: CRITICAL
+        default_source: UNVERIFIED
+        description: >-
+          Ratio of the monitored sensor rail to the ADC reading, 1.0 for a plain divider.
+          This channel measures the rail; it never drives it (IOM-001 AI_5V_REF).
+        live_edit: false
+      - name: ref5v_offset
+        id: 0x0359
+        type: f32
+        unit: V
+        default: 0.0
+        min: -1.0
+        max: 1.0
+        owner: ENGINEER
+        safety_class: CRITICAL
+        default_source: UNVERIFIED
+        live_edit: false
+      - name: ref5v_min
+        id: 0x035A
+        type: f32
+        unit: V
+        default: 4.6
+        min: 3.0
+        max: 5.2
+        owner: ENGINEER
+        safety_class: CRITICAL
+        default_source: UNVERIFIED
+        description: >-
+          Lower bound of the sensor-rail tolerance. This item is essential, and it is
+          the least obvious channel in the product: if the 5 V rail collapses, every
+          5 V sensor - throttle, MAP, MAF, lambda, fuel and oil pressure, ethanol, EGT -
+          reads incorrectly AND plausibly, so the per-channel open/short, range and rate
+          checks are all fooled simultaneously. Monitoring the reference is the only way
+          to detect that class of failure at all. Sensor test S9; IOM-001 sec.2.
+      - name: ref5v_max
+        id: 0x035B
+        type: f32
+        unit: V
+        default: 5.4
+        min: 5.0
+        max: 6.0
+        owner: ENGINEER
+        safety_class: CRITICAL
+        default_source: UNVERIFIED
+        description: Upper bound of the sensor-rail tolerance, same argument as ref5v_min.
+      - name: ref5v_rate_limit
+        id: 0x035C
+        type: f32
+        unit: "V/s"
+        default: 5.0
+        min: 0.1
+        max: 100.0
+        owner: ENGINEER
+        safety_class: CRITICAL
+        default_source: UNVERIFIED
+      - name: ref5v_freshness_ms
+        id: 0x035D
+        type: u16
+        unit: ms
+        default: 1000
+        min: 1
+        max: 20000
+        owner: ENGINEER
+        safety_class: CRITICAL
+        default_source: UNVERIFIED
+      - name: ref5v_transfer
+        id: 0x035E
+        type: enum
+        default: 0
+        owner: ENGINEER
+        safety_class: CRITICAL
+        default_source: UNVERIFIED
+        values:
+          - {name: linear, value: 0}
+          - {name: ratiometric, value: 1}
+          - {name: ntc_table, value: 2}
+          - {name: polynomial, value: 3}
+          - {name: switch_hysteresis, value: 4}
+          - {name: none, value: 5}
+      - name: ref5v_fault_behaviour
+        id: 0x035F
+        type: enum
+        default: 6
+        owner: ENGINEER
+        safety_class: CRITICAL
+        default_source: UNVERIFIED
+        description: >-
+          Default 6 (invalidate_dependents) is not a tuning preference. A rail fault
+          invalidates every ratiometric channel at the same instant, which is the
+          NO_REFERENCE reason code in the SENS-001 sec.2 fault taxonomy.
+
+      # ---- lambda channels 1..4 -------------------------------------------------
+      # Per-cylinder AFR is never inferred from a single common-exhaust sensor without
+      # a validated methodology (FUEL-001 sec.8, UNK-FW-009), so a second channel is
+      # only meaningful with a second physical fitting.
+        values:
+          - {name: substitute_fallback, value: 0}
+          - {name: hold_last_valid_timed, value: 1}
+          - {name: mark_invalid_use_alternate_strategy, value: 2}
+          - {name: enter_limp_mode, value: 3}
+          - {name: request_torque_cut, value: 4}
+          - {name: shutdown_request, value: 5}
+          - {name: invalidate_dependents, value: 6}
+      - name: lambda1_slope
+        id: 0x0360
+        type: f32
+        unit: "lambda/V"
+        default: 0.25
+        min: 0.01
+        max: 5.0
+        owner: ENGINEER
+        safety_class: HIGH
+        default_source: UNVERIFIED
+        description: >-
+          Lambda per volt on the wideband controller's analogue output. The controller
+          linearises the sensor; the ECU never interprets raw sensor volts. Register
+          UNK-GT-010 - neither the fitting nor the controller type is known yet.
+        live_edit: false
+      - name: lambda1_offset
+        id: 0x0361
+        type: f32
+        unit: lambda
+        default: 0.0
+        min: -1.0
+        max: 1.0
+        owner: ENGINEER
+        safety_class: MEDIUM
+        default_source: UNVERIFIED
+        live_edit: false
+      - name: lambda1_min
+        id: 0x0362
+        type: f32
+        unit: lambda
+        default: 0.4
+        min: 0.2
+        max: 1.0
+        owner: ENGINEER
+        safety_class: MEDIUM
+        default_source: UNVERIFIED
+      - name: lambda1_max
+        id: 0x0363
+        type: f32
+        unit: lambda
+        default: 2.0
+        min: 1.0
+        max: 5.0
+        owner: ENGINEER
+        safety_class: MEDIUM
+        default_source: UNVERIFIED
+      - name: lambda1_rate_limit
+        id: 0x0364
+        type: f32
+        unit: "lambda/s"
+        default: 5.0
+        min: 0.1
+        max: 200.0
+        owner: ENGINEER
+        safety_class: MEDIUM
+        default_source: UNVERIFIED
+      - name: lambda1_freshness_ms
+        id: 0x0365
+        type: u16
+        unit: ms
+        default: 40
+        min: 1
+        max: 5000
+        owner: ENGINEER
+        safety_class: MEDIUM
+        default_source: SOURCE-DERIVED
+        source_ref: "SENS-001 sec.7 (lambda 40 ms in closed loop)"
+      - name: lambda1_transfer
+        id: 0x0366
+        type: enum
+        default: 0
+        owner: ENGINEER
+        safety_class: HIGH
+        default_source: UNVERIFIED
+        values:
+          - {name: linear, value: 0}
+          - {name: ratiometric, value: 1}
+          - {name: ntc_table, value: 2}
+          - {name: polynomial, value: 3}
+          - {name: switch_hysteresis, value: 4}
+          - {name: none, value: 5}
+      - name: lambda1_fault_behaviour
+        id: 0x0367
+        type: enum
+        default: 2
+        owner: ENGINEER
+        safety_class: HIGH
+        default_source: UNVERIFIED
+        description: >-
+          An unready, failed or unplugged lambda sensor must never leave the closed loop
+          running on the last value, so the declared behaviour is to mark it invalid and
+          drop to the declared open-loop strategy (FUEL-001 test F12).
+        values:
+          - {name: substitute_fallback, value: 0}
+          - {name: hold_last_valid_timed, value: 1}
+          - {name: mark_invalid_use_alternate_strategy, value: 2}
+          - {name: enter_limp_mode, value: 3}
+          - {name: request_torque_cut, value: 4}
+          - {name: shutdown_request, value: 5}
+          - {name: invalidate_dependents, value: 6}
+
+      - name: lambda2_slope
+        id: 0x0368
+        type: f32
+        unit: "lambda/V"
+        default: 0.25
+        min: 0.01
+        max: 5.0
+        owner: ENGINEER
+        safety_class: HIGH
+        default_source: UNVERIFIED
+        description: >-
+          Second channel. Only populate this block when hardware_lambda_channel_count
+          actually reports a second physical fitting; an unpopulated channel must be
+          declared with transfer = none, not left at a plausible default.
+        live_edit: false
+      - name: lambda2_offset
+        id: 0x0369
+        type: f32
+        unit: lambda
+        default: 0.0
+        min: -1.0
+        max: 1.0
+        owner: ENGINEER
+        safety_class: MEDIUM
+        default_source: UNVERIFIED
+        live_edit: false
+      - name: lambda2_min
+        id: 0x036A
+        type: f32
+        unit: lambda
+        default: 0.4
+        min: 0.2
+        max: 1.0
+        owner: ENGINEER
+        safety_class: MEDIUM
+        default_source: UNVERIFIED
+      - name: lambda2_max
+        id: 0x036B
+        type: f32
+        unit: lambda
+        default: 2.0
+        min: 1.0
+        max: 5.0
+        owner: ENGINEER
+        safety_class: MEDIUM
+        default_source: UNVERIFIED
+      - name: lambda2_rate_limit
+        id: 0x036C
+        type: f32
+        unit: "lambda/s"
+        default: 5.0
+        min: 0.1
+        max: 200.0
+        owner: ENGINEER
+        safety_class: MEDIUM
+        default_source: UNVERIFIED
+      - name: lambda2_freshness_ms
+        id: 0x036D
+        type: u16
+        unit: ms
+        default: 40
+        min: 1
+        max: 5000
+        owner: ENGINEER
+        safety_class: MEDIUM
+        default_source: SOURCE-DERIVED
+        source_ref: "SENS-001 sec.7 (lambda 40 ms in closed loop)"
+      - name: lambda2_transfer
+        id: 0x036E
+        type: enum
+        default: 5
+        owner: ENGINEER
+        safety_class: HIGH
+        default_source: UNVERIFIED
+        description: Defaults to none - a motorcycle with one exhaust fitting has one sensor.
+        values:
+          - {name: linear, value: 0}
+          - {name: ratiometric, value: 1}
+          - {name: ntc_table, value: 2}
+          - {name: polynomial, value: 3}
+          - {name: switch_hysteresis, value: 4}
+          - {name: none, value: 5}
+      - name: lambda2_fault_behaviour
+        id: 0x036F
+        type: enum
+        default: 2
+        owner: ENGINEER
+        safety_class: HIGH
+        default_source: UNVERIFIED
+        values:
+          - {name: substitute_fallback, value: 0}
+          - {name: hold_last_valid_timed, value: 1}
+          - {name: mark_invalid_use_alternate_strategy, value: 2}
+          - {name: enter_limp_mode, value: 3}
+          - {name: request_torque_cut, value: 4}
+          - {name: shutdown_request, value: 5}
+          - {name: invalidate_dependents, value: 6}
+
+      - name: lambda3_slope
+        id: 0x0370
+        type: f32
+        unit: "lambda/V"
+        default: 0.25
+        min: 0.01
+        max: 5.0
+        owner: ENGINEER
+        safety_class: HIGH
+        default_source: UNVERIFIED
+        description: Third channel, used for a 3- or 4-cylinder build with real per-cylinder fittings.
+        live_edit: false
+      - name: lambda3_offset
+        id: 0x0371
+        type: f32
+        unit: lambda
+        default: 0.0
+        min: -1.0
+        max: 1.0
+        owner: ENGINEER
+        safety_class: MEDIUM
+        default_source: UNVERIFIED
+        live_edit: false
+      - name: lambda3_min
+        id: 0x0372
+        type: f32
+        unit: lambda
+        default: 0.4
+        min: 0.2
+        max: 1.0
+        owner: ENGINEER
+        safety_class: MEDIUM
+        default_source: UNVERIFIED
+      - name: lambda3_max
+        id: 0x0373
+        type: f32
+        unit: lambda
+        default: 2.0
+        min: 1.0
+        max: 5.0
+        owner: ENGINEER
+        safety_class: MEDIUM
+        default_source: UNVERIFIED
+      - name: lambda3_rate_limit
+        id: 0x0374
+        type: f32
+        unit: "lambda/s"
+        default: 5.0
+        min: 0.1
+        max: 200.0
+        owner: ENGINEER
+        safety_class: MEDIUM
+        default_source: UNVERIFIED
+      - name: lambda3_freshness_ms
+        id: 0x0375
+        type: u16
+        unit: ms
+        default: 40
+        min: 1
+        max: 5000
+        owner: ENGINEER
+        safety_class: MEDIUM
+        default_source: SOURCE-DERIVED
+        source_ref: "SENS-001 sec.7 (lambda 40 ms in closed loop)"
+      - name: lambda3_transfer
+        id: 0x0376
+        type: enum
+        default: 5
+        owner: ENGINEER
+        safety_class: HIGH
+        default_source: UNVERIFIED
+        values:
+          - {name: linear, value: 0}
+          - {name: ratiometric, value: 1}
+          - {name: ntc_table, value: 2}
+          - {name: polynomial, value: 3}
+          - {name: switch_hysteresis, value: 4}
+          - {name: none, value: 5}
+      - name: lambda3_fault_behaviour
+        id: 0x0377
+        type: enum
+        default: 2
+        owner: ENGINEER
+        safety_class: HIGH
+        default_source: UNVERIFIED
+        values:
+          - {name: substitute_fallback, value: 0}
+          - {name: hold_last_valid_timed, value: 1}
+          - {name: mark_invalid_use_alternate_strategy, value: 2}
+          - {name: enter_limp_mode, value: 3}
+          - {name: request_torque_cut, value: 4}
+          - {name: shutdown_request, value: 5}
+          - {name: invalidate_dependents, value: 6}
+
+      - name: lambda4_slope
+        id: 0x0378
+        type: f32
+        unit: "lambda/V"
+        default: 0.25
+        min: 0.01
+        max: 5.0
+        owner: ENGINEER
+        safety_class: HIGH
+        default_source: UNVERIFIED
+        description: Fourth channel, for a 4-cylinder build with one fitting per cylinder.
+        live_edit: false
+      - name: lambda4_offset
+        id: 0x0379
+        type: f32
+        unit: lambda
+        default: 0.0
+        min: -1.0
+        max: 1.0
+        owner: ENGINEER
+        safety_class: MEDIUM
+        default_source: UNVERIFIED
+        live_edit: false
+      - name: lambda4_min
+        id: 0x037A
+        type: f32
+        unit: lambda
+        default: 0.4
+        min: 0.2
+        max: 1.0
+        owner: ENGINEER
+        safety_class: MEDIUM
+        default_source: UNVERIFIED
+      - name: lambda4_max
+        id: 0x037B
+        type: f32
+        unit: lambda
+        default: 2.0
+        min: 1.0
+        max: 5.0
+        owner: ENGINEER
+        safety_class: MEDIUM
+        default_source: UNVERIFIED
+      - name: lambda4_rate_limit
+        id: 0x037C
+        type: f32
+        unit: "lambda/s"
+        default: 5.0
+        min: 0.1
+        max: 200.0
+        owner: ENGINEER
+        safety_class: MEDIUM
+        default_source: UNVERIFIED
+      - name: lambda4_freshness_ms
+        id: 0x037D
+        type: u16
+        unit: ms
+        default: 40
+        min: 1
+        max: 5000
+        owner: ENGINEER
+        safety_class: MEDIUM
+        default_source: SOURCE-DERIVED
+        source_ref: "SENS-001 sec.7 (lambda 40 ms in closed loop)"
+      - name: lambda4_transfer
+        id: 0x037E
+        type: enum
+        default: 5
+        owner: ENGINEER
+        safety_class: HIGH
+        default_source: UNVERIFIED
+        values:
+          - {name: linear, value: 0}
+          - {name: ratiometric, value: 1}
+          - {name: ntc_table, value: 2}
+          - {name: polynomial, value: 3}
+          - {name: switch_hysteresis, value: 4}
+          - {name: none, value: 5}
+      - name: lambda4_fault_behaviour
+        id: 0x037F
+        type: enum
+        default: 2
+        owner: ENGINEER
+        safety_class: HIGH
+        default_source: UNVERIFIED
+
+      # ---- shared sensor behaviour ---------------------------------------------
+        values:
+          - {name: substitute_fallback, value: 0}
+          - {name: hold_last_valid_timed, value: 1}
+          - {name: mark_invalid_use_alternate_strategy, value: 2}
+          - {name: enter_limp_mode, value: 3}
+          - {name: request_torque_cut, value: 4}
+          - {name: shutdown_request, value: 5}
+          - {name: invalidate_dependents, value: 6}
+      - name: sensor_filter_cutoff_hz
+        id: 0x0380
+        type: f32
+        unit: Hz
+        default: 250.0
+        min: 1.0
+        max: 5000.0
+        owner: ENGINEER
+        safety_class: MEDIUM
+        default_source: UNVERIFIED
+        description: >-
+          Default analogue anti-alias cutoff for the slow-changing channels. The fast
+          channels (knock, ignition current, injector current) are deliberately excluded
+          - their bandwidth is part of the signal, not noise.
+      - name: sensor_dual_check_enabled
+        id: 0x0381
+        type: bool
+        default: 1
+        owner: ENGINEER
+        safety_class: MEDIUM
+        default_source: UNVERIFIED
+        description: >-
+          Cross-check a redundant pair (TPS1/TPS2, front/rear wheel). Enabled by default
+          because the check costs nothing and a disagreement is otherwise invisible.
+      - name: sensor_dual_mismatch_max
+        id: 0x0382
+        type: f32
+        unit: "%"
+        default: 5.0
+        min: 0.1
+        max: 50.0
+        owner: ENGINEER
+        safety_class: MEDIUM
+        default_source: UNVERIFIED
+        description: >-
+          Largest disagreement between the two members of a pair, in percent of full
+          scale. Above this the pair is declared INCONSISTENT (SENS-001 sec.8).
+      - name: sensor_dual_policy
+        id: 0x0383
+        type: enum
+        default: 0
+        owner: ENGINEER
+        safety_class: HIGH
+        default_source: UNVERIFIED
+        description: >-
+          What happens on INCONSISTENT. The policy is explicit per configuration
+          because "average the two" is only defensible for a cable throttle; for
+          fly-by-wire, invalidating both is the honest answer.
+        values:
+          - {name: invalidate_both, value: 0, description: Both channels lose validity}
+          - {name: average, value: 1, description: Only defensible for a redundant cable throttle}
+          - {name: use_primary, value: 2, description: Degrade to one channel, raise a DTC}
+          - {name: use_minimum, value: 3, description: Fail toward the smaller value}
+      - name: sensor_frozen_window_ms
+        id: 0x0384
+        type: u16
+        unit: ms
+        default: 2000
+        min: 100
+        max: 60000
+        owner: ENGINEER
+        safety_class: MEDIUM
+        default_source: UNVERIFIED
+        description: >-
+          Window over which an unchanging value is declared FROZEN. Computed from a
+          sequence advance and a timestamp, never from "the value looks plausible"
+          (SENS-001 sec.1, hazard H-11).
+      - name: sensor_reference_5v_enabled
+        id: 0x0385
+        type: bool
+        default: 1
+        owner: ENGINEER
+        safety_class: CRITICAL
+        default_source: UNVERIFIED
+        description: >-
+          The 5 V reference monitor. There is no safe default of off: without it, a
+          collapsed sensor rail is undetectable and every ratiometric channel is
+          simultaneously wrong in a plausible direction.
+      - name: sensor_reference_5v_fault_action
+        id: 0x0386
+        type: enum
+        default: 1
+        owner: ENGINEER
+        safety_class: CRITICAL
+        default_source: UNVERIFIED
+        description: >-
+          What a reference fault does to the channels that depend on it. The default
+          invalidates them, because continuing on untrusted rails is precisely the
+          failure this channel exists to catch.
+        values:
+          - {name: warn_only, value: 0, description: DTC only - not recommended}
+          - {name: invalidate_5v_sensors, value: 1, description: All ratiometric channels lose validity}
+          - {name: enter_limp_mode, value: 2, description: Also reduce torque authority}
+          - {name: shutdown_request, value: 3, description: Latched cut}
+        dependencies: [ref5v_min, ref5v_max]
+
+  - name: hardware
+    base_id: 0x0400
+    items:
+      # Declared electrical behaviour of the power stage. ACT-001 sec.1/2: an output
+      # that cannot state its current limit, thermal limit, timeout and default/fault
+      # state does not ship. Everything here describes what the hardware actually does,
+      # not what a tune would like it to do.
+      - name: injector_driver_type
+        id: 0x0400
+        type: enum
+        default: 0
+        owner: ENGINEER
+        safety_class: CRITICAL
+        default_source: UNVERIFIED
+        description: >-
+          Injector power stage. Peak-and-hold exists only where a driver provides a
+          bounded peak phase and a bounded hold phase; with a high-Z saturated driver the
+          ECU must command a much longer pulse for the same flow. Register UNK-GT-004.
+        values:
+          - {name: high_z_saturated, value: 0, description: High-impedance coil, ECU commands full pulse}
+          - {name: low_z_peak_and_hold, value: 1, description: Low-impedance coil with peak/hold driver}
+      - name: ignition_driver_topology
+        id: 0x0401
+        type: enum
+        default: 0
+        owner: ENGINEER
+        safety_class: CRITICAL
+        default_source: UNVERIFIED
+        description: >-
+          Coil topology, which determines whether the ECU computes dwell at all. A CDI
+          is explicitly not assumed and is not supported without a validated profile
+          entry (IGN-001 sec.1). Register UNK-GT-006.
+        values:
+          - {name: smart_coil, value: 0, description: Dwell and current limit inside the coil}
+          - {name: logic_level, value: 1, description: External logic-level igniter}
+          - {name: dumb_coil_external_igbt, value: 2, description: ECU computes dwell, external IGBT}
+          - {name: wasted_spark, value: 3, description: Paired coils, correct polarity required}
+      - name: injector_peak_current_a
+        id: 0x0402
+        type: f32
+        unit: A
+        default: 4.0
+        min: 0.5
+        max: 8.0
+        owner: ENGINEER
+        safety_class: CRITICAL
+        default_source: UNVERIFIED
+        description: >-
+          Peak current the driver sources during the opening phase. Ignored for a
+          high-Z saturated driver, which has no peak phase.
+      - name: injector_hold_current_a
+        id: 0x0403
+        type: f32
+        unit: A
+        default: 1.2
+        min: 0.2
+        max: 6.0
+        owner: ENGINEER
+        safety_class: CRITICAL
+        default_source: UNVERIFIED
+        description: >-
+          Hold current after opening. This is what keeps the driver's dissipation
+          manageable over a long pulse; it is also the number that must be inside the
+          driver IC's own limit, which is enforced in hardware.
+      - name: injector_max_duty_pct
+        id: 0x0404
+        type: f32
+        unit: "%"
+        default: 85.0
+        min: 5.0
+        max: 100.0
+        owner: ENGINEER
+        safety_class: CRITICAL
+        default_source: UNVERIFIED
+        description: >-
+          Hardware duty ceiling for the injector channels. Enforced by the driver, not
+          only by software: exceeding it is a DTC and a protective cut, never a warning
+          (ACT-001 sec.1, hazard H-04). The safety group carries the ECU-side ceiling.
+      - name: ignition_peak_current_a
+        id: 0x0405
+        type: f32
+        unit: A
+        default: 7.5
+        min: 1.0
+        max: 16.0
+        owner: ENGINEER
+        safety_class: CRITICAL
+        default_source: UNVERIFIED
+        description: >-
+          Primary current the gate stage sources while the coil charges. Sets how fast
+          the coil reaches saturation and therefore how short the effective dwell has to
+          be at high rpm.
+      - name: ignition_hold_current_a
+        id: 0x0406
+        type: f32
+        unit: A
+        default: 3.5
+        min: 0.5
+        max: 10.0
+        owner: ENGINEER
+        safety_class: CRITICAL
+        default_source: UNVERIFIED
+        description: >-
+          Current held after saturation. Keeping the coil saturated while the spark
+          event is required is what a smart driver does automatically; with a dumb coil
+          the ECU must stop the charge at the right instant.
+      - name: ignition_max_dwell_ms
+        id: 0x0407
+        type: f32
+        unit: ms
+        default: 8.0
+        min: 1.0
+        max: 15.0
+        owner: ENGINEER
+        safety_class: CRITICAL
+        default_source: UNVERIFIED
+        description: >-
+          Hardware maximum dwell, enforced by a timer or by the smart driver
+          independently of the CPU. This is a hardware property, not a software promise:
+          with the CPU halted mid-dwell the timer still ends it (hazard H-03, test I3).
+      - name: ignition_spark_divider_ratio
+        id: 0x0408
+        type: f32
+        unit: ""
+        default: 9.0
+        min: 1.0
+        max: 20.0
+        owner: ENGINEER
+        safety_class: HIGH
+        default_source: UNVERIFIED
+        description: >-
+          Primary-side divider ratio used for spark-duration feedback, which turns
+          "we commanded a spark" into "a spark event was observed". That measured event
+          is what the safety case and the dyno analyser actually need. Register
+          UNK-HW-006.
+      - name: aux_output_function_0
+        id: 0x0409
+        type: enum
+        default: 0
+        owner: ENGINEER
+        safety_class: HIGH
+        default_source: UNVERIFIED
+        description: >-
+          Function assigned to user output 0. Assignment is validated: two functions on
+          one channel, or a function the hardware profile cannot support, is refused
+          with a specific reason (ACT-001 sec.7).
+        values:
+          - {name: unassigned, value: 0, description: Off, default and fault state}
+          - {name: user_output, value: 1, description: Driven directly by the tuner}
+          - {name: tachometer, value: 2, description: Square wave proportional to rpm}
+          - {name: shift_light, value: 3, description: Programmable shift light}
+          - {name: warning_lamp, value: 4, description: Drive-by-wire and fault lamp}
+          - {name: lambda_heater, value: 5, description: Wideband heater enable}
+          - {name: boost_solenoid, value: 6, description: Boost control PWM}
+          - {name: vvt_solenoid, value: 7, description: Camshaft phaser PWM}
+          - {name: idle_pwm, value: 8, description: PWM idle air control}
+          - {name: stepper_a, value: 9, description: Stepper H-bridge, one coil}
+          - {name: stepper_b, value: 10, description: Stepper H-bridge, other coil}
+          - {name: fuel_pump, value: 11, description: Pump drive, PWM or relay}
+          - {name: main_relay, value: 12, description: Main relay latch}
+          - {name: purge_valve, value: 13, description: Evap purge}
+          - {name: brake_light, value: 14, description: Vehicle brake light interlock}
+
+      - name: aux_output_function_1
+        id: 0x040A
+        type: enum
+        default: 0
+        owner: ENGINEER
+        safety_class: HIGH
+        default_source: UNVERIFIED
+        values:
+          - {name: unassigned, value: 0}
+          - {name: user_output, value: 1}
+          - {name: tachometer, value: 2}
+          - {name: shift_light, value: 3}
+          - {name: warning_lamp, value: 4}
+          - {name: lambda_heater, value: 5}
+          - {name: boost_solenoid, value: 6}
+          - {name: vvt_solenoid, value: 7}
+          - {name: idle_pwm, value: 8}
+          - {name: stepper_a, value: 9}
+          - {name: stepper_b, value: 10}
+          - {name: fuel_pump, value: 11}
+          - {name: main_relay, value: 12}
+          - {name: purge_valve, value: 13}
+          - {name: brake_light, value: 14}
+      - name: aux_output_function_2
+        id: 0x040B
+        type: enum
+        default: 0
+        owner: ENGINEER
+        safety_class: HIGH
+        default_source: UNVERIFIED
+        values:
+          - {name: unassigned, value: 0}
+          - {name: user_output, value: 1}
+          - {name: tachometer, value: 2}
+          - {name: shift_light, value: 3}
+          - {name: warning_lamp, value: 4}
+          - {name: lambda_heater, value: 5}
+          - {name: boost_solenoid, value: 6}
+          - {name: vvt_solenoid, value: 7}
+          - {name: idle_pwm, value: 8}
+          - {name: stepper_a, value: 9}
+          - {name: stepper_b, value: 10}
+          - {name: fuel_pump, value: 11}
+          - {name: main_relay, value: 12}
+          - {name: purge_valve, value: 13}
+          - {name: brake_light, value: 14}
+      - name: aux_output_function_3
+        id: 0x040C
+        type: enum
+        default: 0
+        owner: ENGINEER
+        safety_class: HIGH
+        default_source: UNVERIFIED
+        values:
+          - {name: unassigned, value: 0}
+          - {name: user_output, value: 1}
+          - {name: tachometer, value: 2}
+          - {name: shift_light, value: 3}
+          - {name: warning_lamp, value: 4}
+          - {name: lambda_heater, value: 5}
+          - {name: boost_solenoid, value: 6}
+          - {name: vvt_solenoid, value: 7}
+          - {name: idle_pwm, value: 8}
+          - {name: stepper_a, value: 9}
+          - {name: stepper_b, value: 10}
+          - {name: fuel_pump, value: 11}
+          - {name: main_relay, value: 12}
+          - {name: purge_valve, value: 13}
+          - {name: brake_light, value: 14}
+      - name: aux_output_timeout_ms
+        id: 0x040D
+        type: u16
+        unit: ms
+        default: 5000
+        min: 10
+        max: 60000
+        owner: ENGINEER
+        safety_class: HIGH
+        default_source: UNVERIFIED
+        description: >-
+          Maximum continuous ON time for one aux output, after which the driver forces
+          it off. No output in the product has an unbounded energised duration: a
+          solenoid welded closed is a fire, and a stepper energised forever is a thermal
+          event (ACT-001 sec.6, test A11).
+      - name: aux_output_duty_max_pct
+        id: 0x040E
+        type: f32
+        unit: "%"
+        default: 100.0
+        min: 1.0
+        max: 100.0
+        owner: ENGINEER
+        safety_class: HIGH
+        default_source: UNVERIFIED
+        description: Duty ceiling for the PWM aux outputs, per output profile.
+      - name: aux_output_flags
+        id: 0x040F
+        type: bits
+        default: 8
+        owner: ENGINEER
+        safety_class: HIGH
+        default_source: UNVERIFIED
+        description: >-
+          Per-output behaviour flags. The default sets failsafe_off, so with the ECU
+          unpowered or wedged every aux output is off - the only state that is
+          unambiguously safe for an unknown device attached to it.
+        bits: [invert, latching, failsafe_off, diagnostic, slow_decay, wake_capable]
+      - name: hardware_capabilities
+        id: 0x0410
+        type: bits
+        default: 0
+        owner: READ_ONLY
+        safety_class: CRITICAL
+        default_source: UNVERIFIED
+        derived: true
+        description: >-
+          Capability set the firmware may assume. Derived from the hardware profile and
+          the end-of-line test record, never hand-set: a capability is on only if the
+          physical resource exists and passed end of line against the unit's serial
+          number (IOM-001 sec.6). The remaining profile capabilities (CAN-FD, stepper
+          IAC, anti-lag, internal log, spark feedback, injector diagnostics, gear and
+          clutch sensing) live in the hardware profile binary.
+        live_edit: false
+        bits:
+          - cap_ckp
+          - cap_cmp
+          - cap_sequential
+          - cap_semi_sequential
+          - cap_batch
+          - cap_wasted_spark
+          - cap_staged
+          - cap_wideband
+          - cap_narrowband
+          - cap_multiple_lambda
+          - cap_knock
+          - cap_vvt
+          - cap_boost
+          - cap_traction
+          - cap_dbw
+          - cap_flex_fuel
+      - name: hardware_fuel_pump_max_duty_pct
+        id: 0x0411
+        type: f32
+        unit: "%"
+        default: 100.0
+        min: 10.0
+        max: 100.0
+        owner: ENGINEER
+        safety_class: HIGH
+        default_source: UNVERIFIED
+        description: >-
+          Duty ceiling for the pump drive. A short circuit latches the output off with a
+          bounded retry policy, so the pump is a stopped engine rather than a melted
+          harness. Register UNK-GT-012.
+      - name: hardware_fuel_pump_timeout_ms
+        id: 0x0412
+        type: u32
+        unit: ms
+        default: 3600000
+        min: 1000
+        max: 86400000
+        owner: ENGINEER
+        safety_class: HIGH
+        default_source: UNVERIFIED
+        description: >-
+          Maximum continuous pump ON time with a defined consequence, so a welded
+          relay feedback contact cannot leave a pump running indefinitely.
+      - name: hardware_main_relay_feedback
+        id: 0x0413
+        type: bool
+        default: 0
+        owner: ENGINEER
+        safety_class: MEDIUM
+        default_source: UNVERIFIED
+        description: >-
+          True when the main relay is actually monitored. A welded main relay is a
+          common failure; without feedback the ECU can only report that it commanded
+          the relay, which is not the same statement.
+      - name: hardware_lambda_channel_count
+        id: 0x0414
+        type: u8
+        default: 1
+        min: 1
+        max: 4
+        owner: READ_ONLY
+        safety_class: HIGH
+        default_source: UNVERIFIED
+        derived: true
+        description: >-
+          Physical wideband input count. The controller refuses per-cylinder trim beyond
+          this number, so it cannot imply a per-cylinder measurement that does not exist.
+        live_edit: false
+      - name: hardware_knock_channel_count
+        id: 0x0415
+        type: u8
+        default: 0
+        min: 0
+        max: 2
+        owner: READ_ONLY
+        safety_class: HIGH
+        default_source: UNVERIFIED
+        derived: true
+        description: >-
+          Physical knock inputs. Zero by default because no knock sensor is known to be
+          fitted on this engine: knock detection is impossible without one, and no claim
+          is made without hardware (IGN-001 sec.5). Register UNK-FW-008.
+        live_edit: false
+      - name: hardware_injector_channel_count
+        id: 0x0416
+        type: u8
+        default: 2
+        min: 1
+        max: 8
+        owner: READ_ONLY
+        safety_class: CRITICAL
+        default_source: UNVERIFIED
+        derived: true
+        description: Physical injector output count, primary plus secondary. live_edit false.
+        live_edit: false
+      - name: hardware_ignition_channel_count
+        id: 0x0417
+        type: u8
+        default: 2
+        min: 1
+        max: 8
+        owner: READ_ONLY
+        safety_class: CRITICAL
+        default_source: UNVERIFIED
+        derived: true
+        description: Physical ignition output count. live_edit false.
+        live_edit: false
+      - name: hardware_driver_overtemp_c
+        id: 0x0418
+        type: f32
+        unit: "degC"
+        default: 125.0
+        min: 60.0
+        max: 200.0
+        owner: ENGINEER
+        safety_class: HIGH
+        default_source: UNVERIFIED
+        description: >-
+          Driver overtemperature threshold at which the stage shuts down and raises a
+          DTC, recovering after cooldown rather than latching (ACT-001 test A5).
+      - name: hardware_stepper_max_energised_ms
+        id: 0x0419
+        type: u16
+        unit: ms
+        default: 10000
+        min: 100
+        max: 60000
+        owner: ENGINEER
+        safety_class: MEDIUM
+        default_source: UNVERIFIED
+        description: >-
+          Hard stall/timeout limit for the idle stepper. A stepper commanded forever is
+          a thermal event, so the maximum energised time is bounded and a return-to-zero
+          policy follows it.
+      - name: hardware_wasted_spark_pairs
+        id: 0x041A
+        type: u8
+        default: 0
+        min: 0
+        max: 2
+        owner: READ_ONLY
+        safety_class: HIGH
+        default_source: UNVERIFIED
+        derived: true
+        description: >-
+          Number of wasted-spark coil pairs, which determines the correct pairing and
+          polarity of the ignition outputs on a 4-cylinder build (IGN-001 test I11).
+        live_edit: false
+      - name: hardware_aux_output_count
+        id: 0x041B
+        type: u8
+        default: 4
+        min: 0
+        max: 4
+        owner: READ_ONLY
+        safety_class: MEDIUM
+        default_source: UNVERIFIED
+        derived: true
+        description: Number of assignable user outputs exposed by this profile. live_edit false.
+        live_edit: false
